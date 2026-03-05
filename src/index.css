@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+:root {
+  --rlc-page-bg: #eceff1;
+  --rlc-header-bg: #ffffff;
+  --rlc-header-text: #111827;
+  --rlc-header-border: #d1d5db;
+
+  --rlc-sidebar-bg: #1f2a37;
+  --rlc-sidebar-text: #e5e7eb;
+  --rlc-sidebar-icon: #9ca3af;
+
+  --rlc-card-green: #43a047;
+  --rlc-card-green-dark: #2e7d32;
+  --rlc-card-black: #111827;
+
+  --rlc-strip-black: #0b0f14;
+  --rlc-strip-text: #f9fafb;
+
+  --rlc-panel-navy: #13233f;
+  --rlc-panel-navy-soft: #1c3153;
+  --rlc-panel-navy-border: #2b4369;
+
+  --rlc-table-bg: #f8fafc;
+  --rlc-table-head: #e5e7eb;
+  --rlc-table-border: #d1d5db;
+  --rlc-table-text: #111827;
+  --rlc-table-muted: #6b7280;
+
+  --rlc-danger: #dc2626;
+  --rlc-danger-hover: #b91c1c;
+  --rlc-success: #2e7d32;
+  --rlc-success-hover: #256b29;
+  --rlc-primary: #2563eb;
+  --rlc-primary-hover: #1d4ed8;
+  --rlc-secondary: #6b7280;
+  --rlc-secondary-hover: #4b5563;
+  --rlc-disabled: #9ca3af;
+}
+
+body {
+  background: var(--rlc-page-bg);
+  color: var(--rlc-header-text);
+}
+
