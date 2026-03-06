@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import jsPDF from 'jspdf';
 import { useSelector } from 'react-redux';
@@ -25,6 +25,7 @@ const Reports = () => {
   const [entries, setEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dailyBillAllClosed, setDailyBillAllClosed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
   const toLocalISODate = (value) => {
     if (!value) return '';
@@ -51,6 +52,58 @@ const Reports = () => {
     const hour12 = hourNum % 12 === 0 ? 12 : hourNum % 12;
     return `${hour12}${suffix}`;
   };
+
+  const getSlotHourMinute = (slot) => {
+    if (!slot) return null;
+    if (typeof slot.hour === 'number' && !Number.isNaN(slot.hour)) {
+      return { hour24: slot.hour, minute: 0 };
+    }
+    const raw = String(slot.title || slot.label || '').trim();
+    if (!raw) return null;
+
+    const ampm = raw.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (ampm) {
+      const h = parseInt(ampm[1], 10);
+      const m = parseInt(ampm[2] || '0', 10);
+      const period = String(ampm[3]).toUpperCase();
+      let hour24 = h % 12;
+      if (period === 'PM') hour24 += 12;
+      return { hour24, minute: m };
+    }
+
+    const hhmm = raw.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (hhmm) {
+      return { hour24: parseInt(hhmm[1], 10), minute: parseInt(hhmm[2], 10) };
+    }
+
+    const hOnly = raw.match(/\b(\d{1,2})\b/);
+    if (hOnly) return { hour24: parseInt(hOnly[1], 10), minute: 0 };
+    return null;
+  };
+
+  const getSlotCloseAt = useCallback((slot, baseDate = drawDate) => {
+    const hm = getSlotHourMinute(slot);
+    if (!hm || !baseDate) return null;
+    const [y, m, d] = String(baseDate).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const closeAt = new Date(y, m - 1, d, hm.hour24, hm.minute, 0, 0);
+    closeAt.setMinutes(closeAt.getMinutes() - 10);
+    return closeAt;
+  }, [drawDate]);
+
+  const isSlotClosedByTime = useCallback((slot) => {
+    const closeAt = getSlotCloseAt(slot, drawDate);
+    if (!closeAt) return false;
+    return currentTime.getTime() >= closeAt.getTime();
+  }, [currentTime, drawDate, getSlotCloseAt]);
+
+  const isSlotClosed = useCallback((slot) => {
+    if (!slot) return false;
+    if (slot.isActive === true) return false;
+    if (slot.isActive === false) return true;
+    if (slot.isExpired === true) return true;
+    return isSlotClosedByTime(slot);
+  }, [isSlotClosedByTime]);
 
   const getWinningNumbers = async (date) => {
     try {
@@ -102,7 +155,7 @@ const Reports = () => {
 
   const fetchTimeSlots = useCallback(async () => {
     try {
-      const res = await axios.get('/api/v1/timeslots');
+      const res = await axios.get('/api/v1/timeslots', { params: { date: drawDate } });
       const slots = res.data?.timeSlots || res.data || [];
       const list = Array.isArray(slots) ? slots : [];
       setDraws(list);
@@ -114,7 +167,7 @@ const Reports = () => {
     } catch (err) {
       setDraws([]);
     }
-  }, []);
+  }, [drawDate]);
 
   useEffect(() => {
     fetchTimeSlots();
@@ -144,6 +197,11 @@ const Reports = () => {
   }, [fetchTimeSlots]);
 
   useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     const fetchClients = async () => {
       if (role === 'user') return;
       try {
@@ -166,6 +224,31 @@ const Reports = () => {
   useEffect(() => {
     if (drawDate) getWinningNumbers(drawDate);
   }, [drawDate, selectedDraw]);
+
+  const sortedDraws = useMemo(() => {
+    const list = Array.isArray(draws) ? [...draws] : [];
+    return list.sort((a, b) => {
+      const aa = getSlotHourMinute(a);
+      const bb = getSlotHourMinute(b);
+      const av = (aa?.hour24 ?? 0) * 60 + (aa?.minute ?? 0);
+      const bv = (bb?.hour24 ?? 0) * 60 + (bb?.minute ?? 0);
+      return av - bv;
+    });
+  }, [draws]);
+
+  const closedDraws = useMemo(
+    () => sortedDraws.filter((slot) => isSlotClosed(slot)),
+    [sortedDraws, isSlotClosed]
+  );
+
+  useEffect(() => {
+    if (!selectedDraw) {
+      if (closedDraws.length) setSelectedDraw(closedDraws[0]);
+      return;
+    }
+    const exists = closedDraws.some((d) => String(d._id) === String(selectedDraw._id));
+    if (!exists) setSelectedDraw(closedDraws[0] || null);
+  }, [selectedDraw, closedDraws]);
 
   // Helper to build daily bill result without mutating component state
   const buildDailyBillResult = async (dateParam = drawDate) => {
@@ -197,17 +280,6 @@ const Reports = () => {
     };
 
     const toISODate = (d) => toLocalISODate(d);
-    const isDrawClosedLocal = (d) => {
-      if (!d) return false;
-      if (typeof d.isActive === 'boolean') return d.isActive === false;
-      if (typeof d.isExpired === 'boolean') return d.isExpired === true;
-      if (d.draw_date) {
-        const dt = new Date(d.draw_date);
-        dt.setHours(23, 59, 59, 999);
-        return Date.now() > dt.getTime();
-      }
-      return false;
-    };
     const categorize = (num) => {
       if (/^\d{1}$/.test(num) || (num.includes('+') && num.length === 2) || (num.split('+').length - 1 === 2 && num.length === 3) || (num.split('+').length - 1 === 3 && num.length === 4)) return 'HINSA';
       if (/^\d{2}$/.test(num) || (num.includes('+') && num.length <= 3) || (num.split('+').length - 1 === 2 && num.length === 4)) return 'AKRA';
@@ -233,7 +305,7 @@ const Reports = () => {
       const dateISO = toISODate(dateParam) || dateParam;
       targetDraws = (draws || [])
         .filter((d) => {
-          if (!isDrawClosedLocal(d)) return false;
+          if (!isSlotClosed(d)) return false;
           // Some closed slots may not carry draw_date reliably; include them in all-closed mode.
           if (!d?.draw_date) return true;
           return toISODate(d.draw_date) === dateISO;
@@ -680,16 +752,7 @@ const Reports = () => {
       }
   };
 
-    const isSelectedDrawClosed = () => {
-      if (selectedDraw) {
-        if (typeof selectedDraw.isActive === 'boolean') return selectedDraw.isActive === false;
-        if (typeof selectedDraw.isExpired === 'boolean') return selectedDraw.isExpired;
-        if (selectedDraw.draw_date) { const d = new Date(selectedDraw.draw_date); d.setHours(23,59,59,999); return Date.now() > d.getTime(); }
-        return false;
-      }
-      if (drawDate) { const d = new Date(drawDate); d.setHours(23,59,59,999); return Date.now() > d.getTime(); }
-      return false;
-    };
+    const isSelectedDrawClosed = () => isSlotClosed(selectedDraw);
 
     const generateVoucherPDF = async ({ userId = null, date = null, timeSlotId = null, prizeTypeParam = 'All' } = {}) => {
       // Ensure draw is closed before generating voucher
@@ -1663,22 +1726,15 @@ const Reports = () => {
         </div>
         <div className="min-w-[200px] flex-1">
           <label className="block mb-1 text-sm font-semibold uppercase tracking-wide text-[#374151]">Draw Name</label>
-          <select value={dailyBillAllClosed ? ALL_CLOSED_DRAWS : (selectedDraw?._id || "")} onChange={e => {
+          <select value={selectedDraw?._id || ""} onChange={e => {
             const id = e.target.value;
-            if (id === ALL_CLOSED_DRAWS) {
-              setDailyBillAllClosed(true);
-              setSelectedDraw(null);
-              return;
-            }
-            setDailyBillAllClosed(false);
-            const d = draws.find(x => String(x._id) === String(id)) || null;
+            const d = closedDraws.find(x => String(x._id) === String(id)) || null;
             setSelectedDraw(d);
             if (d && d.draw_date) setDrawDate(toLocalISODate(d.draw_date));
           }} className="px-3 py-2 rounded border w-full" style={{ background: '#fff', color: 'var(--rlc-header-text)', borderColor: '#9ca3af' }}>
-            <option value="">-- Select time slot --</option>
-            {ledger === 'DAILY BILL' && <option value={ALL_CLOSED_DRAWS}>All Closed Draws</option>}
-            {draws.map(d => (
-              <option key={d._id} value={d._id}>{`${formatTimeSlotLabel(d)}${d.isActive === false ? ' (Closed)' : d.isActive === true ? ' (Active)' : ''}`}</option>
+            <option value="">{closedDraws.length ? '-- Select Closed Time Slot --' : '-- No Closed Time Slot --'}</option>
+            {closedDraws.map(d => (
+              <option key={d._id} value={d._id}>{`${formatTimeSlotLabel(d)} (Closed)`}</option>
             ))}
           </select>
         </div>

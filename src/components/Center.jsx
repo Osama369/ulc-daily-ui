@@ -8,12 +8,29 @@ import { FixedSizeList as List } from 'react-window';
 import { FaBalanceScale, FaBell, FaStar } from 'react-icons/fa';
 import { Box, TextField, Button, Switch, FormControlLabel, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Checkbox, IconButton, Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions, Menu, MenuItem } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
+import EventIcon from '@mui/icons-material/Event';
 import { useSelector, useDispatch } from "react-redux";
 import { showLoading, hideLoading } from '../redux/features/alertSlice';
 import { setUser } from '../redux/features/userSlice';
 import  Spinner  from '../components/Spinner'
 import { REPORT_TYPE_OPTIONS, runReportExportByType } from '../utils/reportExport';
 /* Body Content removed — du spplicated table was present above in the centered two-column layout. */
+
+const getPakistanISODate = (value = new Date()) => {
+  const dateObj = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateObj.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Karachi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(dateObj);
+  const year = parts.find((p) => p.type === "year")?.value;
+  const month = parts.find((p) => p.type === "month")?.value;
+  const day = parts.find((p) => p.type === "day")?.value;
+  if (!year || !month || !day) return "";
+  return `${year}-${month}-${day}`;
+};
 
 function Center() {
   const navigate = useNavigate();
@@ -33,7 +50,7 @@ function Center() {
   const [selectedDraw, setSelectedDraw] = useState(null);
   const [selectedClosedDrawForPrint, setSelectedClosedDrawForPrint] = useState(null);
   const [drawRemainingMs, setDrawRemainingMs] = useState(null);
-  const [drawDate, setDrawDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [drawDate, setDrawDate] = useState(() => getPakistanISODate(new Date()));
   const [drawTime, setDrawTime] = useState("");
   const [ledger, setLedger] = useState("DAILY BILL");
   const [slotMenuAnchorEl, setSlotMenuAnchorEl] = useState(null);
@@ -87,7 +104,7 @@ function Center() {
     return (
       toLocalISODate(value) ||
       toLocalISODate(fallback) ||
-      new Date().toISOString().split("T")[0]
+      getPakistanISODate(new Date())
     );
   };
 
@@ -154,7 +171,10 @@ function Center() {
 
   const isSlotClosed = useCallback((slot) => {
     if (!slot) return false;
-    if (slot.isActive === false || slot.isExpired === true) return true;
+    // Admin open must override time/expired close so slots can be reopened manually.
+    if (slot.isActive === true) return false;
+    if (slot.isActive === false) return true;
+    if (slot.isExpired === true) return true;
     return isSlotClosedByTime(slot);
   }, [isSlotClosedByTime]);
 
@@ -202,19 +222,28 @@ function Center() {
   const fetchTimeSlots = useCallback(async () => {
     try {
       // load all time slots (admin may mark some inactive/closed)
-      const res = await axios.get('/api/v1/timeslots');
-      const slots = res.data?.timeSlots || res.data || [];
-      setDraws(Array.isArray(slots) ? slots : []);
+      const res = await axios.get('/api/v1/timeslots', { params: { date: drawDate } });
+      const slots = Array.isArray(res.data?.timeSlots || res.data)
+        ? (res.data?.timeSlots || res.data)
+        : [];
+      setDraws(slots);
       setSelectedDraw((prev) => {
         if (!prev || !prev._id) return prev;
-        const refreshed = (Array.isArray(slots) ? slots : []).find((s) => String(s._id) === String(prev._id));
+        const refreshed = slots.find((s) => String(s._id) === String(prev._id));
+        return refreshed || null;
+      });
+      // Keep print draw selection synced with latest admin state/label.
+      // Closed/open filtering still comes from existing time+admin rule (closedDraws useMemo).
+      setSelectedClosedDrawForPrint((prev) => {
+        if (!prev || !prev._id) return prev;
+        const refreshed = slots.find((s) => String(s._id) === String(prev._id));
         return refreshed || null;
       });
     } catch (err) {
       console.error('Failed to fetch timeslots', err);
       setDraws([]);
     }
-  }, []);
+  }, [drawDate]);
 
   // Fetch active timeSlots (admin-managed) so the select can show options
   useEffect(() => {
@@ -3307,7 +3336,46 @@ function Center() {
   };
 
   const generateDailyBillPDF = async (drawForPrint = selectedDraw) => {
-    console.log("Generating Daily Bill PDF...");
+    const selectedUser = userData?.user || {};
+    const hissaShare = (Number(selectedUser.commission ?? 0) || 0) / 100;
+    const multipliers = {
+      HINSA: Number(selectedUser.hinsaMultiplier ?? 0) || 0,
+      AKRA: Number(selectedUser.akraMultiplier ?? 0) || 0,
+      TANDOLA: Number(selectedUser.tandolaMultiplier ?? 0) || 0,
+      PANGORA: Number(selectedUser.pangoraMultiplier ?? 0) || 0,
+    };
+    const rates = {
+      HINSA: Number(selectedUser.singleFigure || 0),
+      AKRA: Number(selectedUser.doubleFigure || 0),
+      TANDOLA: Number(selectedUser.tripleFigure || 0),
+      PANGORA: Number(selectedUser.fourFigure || 0),
+    };
+
+    const formatCurrency = (v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return "0.00";
+      return (Math.round(n * 100) / 100).toFixed(2);
+    };
+
+    const categorize = (num) => {
+      if (/^\d{1}$/.test(num) || (num.includes("+") && num.length === 2) || (num.split("+").length - 1 === 2 && num.length === 3) || (num.split("+").length - 1 === 3 && num.length === 4)) return "HINSA";
+      if (/^\d{2}$/.test(num) || (num.includes("+") && num.length <= 3) || (num.split("+").length - 1 === 2 && num.length === 4)) return "AKRA";
+      if (/^\d{3}$/.test(num) || (num.length === 4 && num.includes("+"))) return "TANDOLA";
+      if (/^\d{4}$/.test(num)) return "PANGORA";
+      return "OTHER";
+    };
+
+    const fetchWinningNumbersForDraw = async (dateValue, draw) => {
+      try {
+        const params = { date: toLocalISODate(dateValue) || dateValue };
+        if (draw && draw._id) params.timeSlotId = draw._id;
+        const response = await axios.get("/api/v1/data/get-winning-numbers", { params });
+        const list = Array.isArray(response.data?.winningNumbers) ? response.data.winningNumbers : [];
+        return list.map((item) => ({ number: String(item.number || ""), type: item.type }));
+      } catch (e) {
+        return [];
+      }
+    };
 
     const fetchedEntries = await fetchVoucherData(drawDate, drawForPrint?._id);
     if (!Array.isArray(fetchedEntries) || fetchedEntries.length === 0) {
@@ -3315,190 +3383,146 @@ function Center() {
       return;
     }
 
-    const doc = new jsPDF("p", "mm", "a4");
-    const pageWidth = doc.internal.pageSize.width;
+    const allRows = [];
+    fetchedEntries.forEach((entry) => {
+      if (Array.isArray(entry?.data)) allRows.push(...entry.data);
+    });
 
-    // Header
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.text("Daily Bill", pageWidth / 2, 15, { align: "center" });
+    const winningNumbersForDraw = await fetchWinningNumbersForDraw(drawDate, drawForPrint);
+    const rowsByCategory = { HINSA: [], AKRA: [], TANDOLA: [], PANGORA: [] };
 
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Dealer: ${userData?.user.username}`, 14, 30);
-    doc.text(`City: ${userData?.user.city}`, 14, 40);
-  const drawHeaderLabel3 = safeDrawHeaderLabel(drawForPrint);
-  doc.text(`Draw: ${drawHeaderLabel3}`, 14, 50);
+    allRows.forEach((r) => {
+      const num = String(r.uniqueId || r.number || r.no || "");
+      const first = Number(r.firstPrice ?? r.f ?? 0) || 0;
+      const second = Number(r.secondPrice ?? r.s ?? 0) || 0;
+      const cat = categorize(num);
+      if (cat in rowsByCategory) rowsByCategory[cat].push([num, first, second]);
+    });
 
-    // Initialize grand totals for the day
-    const dayGrandTotals = {
-      first: 0,
-      second: 0,
-      net: 0,
-      winningAmount: 0,
-      firstWinning: 0,
-      secondWinning: 0,
+    let firstSale = 0;
+    let secondSale = 0;
+    let prize = 0;
+    const categorySaleTotals = { HINSA: 0, AKRA: 0, TANDOLA: 0, PANGORA: 0 };
+    const secondPrizeDivisor = 3;
+
+    Object.entries(rowsByCategory).forEach(([cat, rows]) => {
+      const catFirst = rows.reduce((acc, [, f]) => acc + (Number(f) || 0), 0);
+      const catSecond = rows.reduce((acc, [, , s]) => acc + (Number(s) || 0), 0);
+      const catSale = catFirst + catSecond;
+      firstSale += catFirst;
+      secondSale += catSecond;
+      categorySaleTotals[cat] += catSale;
+
+      const multiplier = Number(multipliers[cat]) || 1;
+      rows.forEach(([num, f, s]) => {
+        for (const winning of winningNumbersForDraw) {
+          if (num === winning.number || checkPositionalMatch(num, winning.number)) {
+            if (winning.type === "first") prize += (Number(f) || 0) * multiplier;
+            else if (winning.type === "second" || winning.type === "third") prize += ((Number(s) || 0) * multiplier) / secondPrizeDivisor;
+          }
+        }
+      });
+    });
+
+    const sale = firstSale + secondSale;
+    const commission = Object.entries(categorySaleTotals).reduce(
+      (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
+      0
+    );
+    const safi = sale - commission;
+    const subTotal = safi - prize;
+    const hissa = Math.abs(subTotal) * hissaShare;
+    const bill = subTotal >= 0 ? subTotal - hissa : subTotal + hissa;
+
+    const result = {
+      drawRows: [
+        {
+          drawId: drawForPrint?._id || null,
+          drawName: formatTimeSlotLabel(drawForPrint) || "Draw",
+          sale,
+          prize,
+        },
+      ],
+      totals: { sale, safi, prize, subTotal, commission, hissa, bill },
+      meta: {
+        commissionLabel: `${rates.HINSA}%-${rates.AKRA}%-${rates.TANDOLA}%-${rates.PANGORA}%`,
+        hissaPercent: hissaShare * 100,
+      },
     };
 
-    // Group by time slot. If a time slot is selected (timeSlotId mode), backend returns Data docs
-    // without timeSlot; treat all returned data as belonging to the selected draw.
-    const groupedByTimeSlot = {};
-    if (drawForPrint && drawForPrint._id) {
-      const key = drawForPrint.title || 'Draw';
-      groupedByTimeSlot[key] = fetchedEntries.flatMap(entry => entry.data);
-    } else {
-      fetchedEntries.forEach(entry => {
-        const slot = entry.timeSlot;
-        if (!groupedByTimeSlot[slot]) {
-          groupedByTimeSlot[slot] = [];
-        }
-        groupedByTimeSlot[slot].push(...entry.data);
-      });
-    }
-
-    let y = 70;
-    const rowHeight = 10;
-    const colWidths = [40, 30, 30, 30, 30, 30];
+    const doc = new jsPDF("p", "mm", "a4");
+    const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
     const x = 14;
+    const right = pageWidth - 14;
 
-    // Enhanced Table Header
     doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Daily Bill", pageWidth / 2, 14, { align: "center" });
+
+    let y = 24;
+    doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
+    doc.text(`Dealer ID: ${selectedUser.dealerId || ""}`, x, y);
+    doc.text(`Date: ${drawDate}`, x + 62, y);
+    doc.text(`Commission: ${result.meta?.commissionLabel || ""}`, x + 110, y);
+    y += 7;
+    doc.text(`Dealer Name: ${selectedUser.username || ""}`, x, y);
+    doc.text(`City: ${selectedUser.city || ""}`, x + 62, y);
+    doc.text(`Profit/Loss Share: ${formatCurrency(result.meta?.hissaPercent || 0)}%`, x + 110, y);
+    y += 8;
 
-    // Draw header boxes
+    const rowHeight = 8;
+    const colWidths = [80, 60, 40];
+
+    doc.setFont("helvetica", "bold");
     doc.rect(x, y, colWidths[0], rowHeight);
-    doc.text("Draw Time", x + 2, y + 7);
-
+    doc.text("DRAW NAME", x + 2, y + 5.5);
     doc.rect(x + colWidths[0], y, colWidths[1], rowHeight);
-    doc.text("SALE", x + colWidths[0] + 2, y + 7);
-
+    doc.text("SALE", x + colWidths[0] + 2, y + 5.5);
     doc.rect(x + colWidths[0] + colWidths[1], y, colWidths[2], rowHeight);
-    doc.text("PRIZE", x + colWidths[0] + colWidths[1] + 2, y + 7);
-
-    doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2], y, colWidths[3], rowHeight);
-    doc.text("SUB TOTAL", x + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 7);
-
-    doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], y, colWidths[4], rowHeight);
-    doc.text("Share (45%)", x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 7);
-
-    doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4], y, colWidths[5], rowHeight);
-    doc.text("Bill", x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 7);
-
+    doc.text("PRIZE", x + colWidths[0] + colWidths[1] + 2, y + 5.5);
     y += rowHeight;
 
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-
-    // Calculate winning amounts helper function
-    const calculateWinningForTimeSlot = (entries) => {
-      const allVoucherRows = entries.map(item => ({
-        number: item.uniqueId,
-        first: item.firstPrice,
-        second: item.secondPrice
-      }));
-
-      const hinsa = [], akra = [], tandola = [], pangora = [];
-
-      // Categorize entries
-      allVoucherRows.forEach(({ number, first, second }) => {
-        if (/^\d{1}$/.test(number)) {
-          hinsa.push([number, first, second]);
-        } else if (
-          /^\d{2}$/.test(number) ||
-          /^\+\d$/.test(number) ||
-          /^\+\+\d$/.test(number) ||
-          /^\+\+\+\d$/.test(number) ||
-          (number.includes('+') && number.length <= 4)
-        ) {
-          akra.push([number, first, second]);
-        } else if (
-          /^\d{3}$/.test(number) ||
-          (number.length === 4 && number.includes('x'))
-        ) {
-          tandola.push([number, first, second]);
-        } else if (/^\d{4}$/.test(number)) {
-          pangora.push([number, first, second]);
-        }
-      });
-
-      // Calculate winning amounts for each category
-      const calculateSectionWinning = (rows, multiplier) => {
-        let firstWinningAmount = 0;
-        let secondWinningAmount = 0;
-        const secondPrizeDivisor = drawForPrint?.category === 'GTL' ? 5 : 3;
-
-        rows.forEach(([num, f, s]) => {
-          const entryColor = getEntryColor(num);
-
-          if (entryColor[0] !== 0 || entryColor[1] !== 0 || entryColor[2] !== 0) {
-            // Sum over ALL distinct winning numbers that match this entry
-            // so that one entry can win multiple times if there are
-            // multiple different winning numbers sharing the same position.
-            for (const winning of winningNumbers) {
-              if (num === winning.number || checkPositionalMatch(num, winning.number)) {
-                if (winning.type === "first") {
-                  firstWinningAmount += f * multiplier;
-                } else if (winning.type === "second" || winning.type === "third") {
-                  secondWinningAmount += (s * multiplier) / secondPrizeDivisor;
-                }
-              }
-            }
-          }
-        });
-
-        return firstWinningAmount + secondWinningAmount;
-      };
-
-      const hinsaWinning = calculateSectionWinning(hinsa, 8);
-      const akraWinning = calculateSectionWinning(akra, 80);
-      const tandolaWinning = calculateSectionWinning(tandola, 800);
-      const pangoraWinning = calculateSectionWinning(pangora, 8000);
-
-      return hinsaWinning + akraWinning + tandolaWinning + pangoraWinning;
-    };
-
-    // Process each time slot
-    Object.entries(groupedByTimeSlot).forEach(([timeSlot, entries]) => {
-      const firstTotal = entries.reduce((sum, item) => sum + item.firstPrice, 0);
-      const secondTotal = entries.reduce((sum, item) => sum + item.secondPrice, 0);
-      const totalSale = firstTotal + secondTotal;
-      const winningAmount = calculateWinningForTimeSlot(entries);
-      const subtotal = totalSale - winningAmount;
-      const shareAmount = subtotal * 0.45; // 45% share amount
-      const billAmount = subtotal - shareAmount; // Bill amount after share deduction
-      // Add to day totals
-      dayGrandTotals.first += firstTotal;
-      dayGrandTotals.second += secondTotal;
-      dayGrandTotals.net += totalSale;
-      dayGrandTotals.winningAmount += winningAmount;
-
-      // Draw row
+    for (const row of result.drawRows) {
+      if (y > pageHeight - 45) {
+        doc.addPage();
+        y = 20;
+      }
       doc.rect(x, y, colWidths[0], rowHeight);
-      doc.text(timeSlot, x + 2, y + 7);
-
+      doc.text(String(row.drawName || ""), x + 2, y + 5.5);
       doc.rect(x + colWidths[0], y, colWidths[1], rowHeight);
-      doc.text(totalSale.toString(), x + colWidths[0] + 2, y + 7);
-
+      doc.text(formatCurrency(row.sale), x + colWidths[0] + 2, y + 5.5);
       doc.rect(x + colWidths[0] + colWidths[1], y, colWidths[2], rowHeight);
-      doc.text(winningAmount.toFixed(2), x + colWidths[0] + colWidths[1] + 2, y + 7);
-
-      doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2], y, colWidths[3], rowHeight);
-      doc.text(subtotal.toString(), x + colWidths[0] + colWidths[1] + colWidths[2] + 2, y + 7);
-
-      doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3], y, colWidths[4], rowHeight);
-      doc.text(shareAmount.toString(), x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + 2, y + 7);
-
-      doc.rect(x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4], y, colWidths[5], rowHeight);
-      doc.text(billAmount.toFixed(2), x + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] + 2, y + 7);
-
+      doc.text(formatCurrency(row.prize), x + colWidths[0] + colWidths[1] + 2, y + 5.5);
       y += rowHeight;
+    }
 
-      
-    });
+    y += 6;
+    if (y > pageHeight - 55) {
+      doc.addPage();
+      y = 20;
+    }
 
-    
+    doc.setFont("helvetica", "normal");
+    doc.text(`SALE-TOTAL: ${formatCurrency(result.totals.sale)}`, x + 1, y);
+    y += 7;
+    doc.text(`SAFI-SALE: ${formatCurrency(result.totals.safi)}`, x + 1, y);
+    y += 7;
+    doc.text(`PRIZE: ${formatCurrency(result.totals.prize)}`, x + 1, y);
+    y += 7;
+    doc.text(`SUB TOTAL: ${formatCurrency(result.totals.subTotal)}`, x + 1, y);
+    y += 7;
+    doc.text(`PROFIT/LOSS SHARE: ${formatCurrency(result.totals.hissa)}`, x + 1, y);
+    y += 10;
 
-    doc.save("Daily_Bill_RLC.pdf");
+    doc.setFont("helvetica", "bold");
+    doc.rect(x, y - 5, right - x, 9);
+    doc.text(`Bill: ${formatCurrency(result.totals.bill)}`, x + 2, y + 1.5);
+
+    const safeDate = String(drawDate || "").trim().replace(/[^\d-]/g, "") || new Date().toISOString().split("T")[0];
+    doc.save(`Daily_Bill_RLC_${safeDate}.pdf`);
     toast.success("Daily Bill PDF downloaded successfully!");
   };
 
@@ -3542,8 +3566,7 @@ function Center() {
 
   const isPastClosingTime = () => {
     if (!selectedDraw) return false;
-    if (selectedDraw.isExpired || selectedDraw.isActive === false) return true;
-    return isSlotClosedByTime(selectedDraw);
+    return isSlotClosed(selectedDraw);
   };
 
   useEffect(() => {
@@ -3551,7 +3574,7 @@ function Center() {
       setDrawRemainingMs(null);
       return;
     }
-    if (selectedDraw.isExpired || selectedDraw.isActive === false) {
+    if (selectedDraw.isActive === false) {
       setDrawRemainingMs(0);
       return;
     }
@@ -3560,7 +3583,13 @@ function Center() {
       setDrawRemainingMs(null);
       return;
     }
-    setDrawRemainingMs(closeAt.getTime() - currentTime.getTime());
+    const diff = closeAt.getTime() - currentTime.getTime();
+    // Admin reopened slot stays active even if time rule has elapsed.
+    if (selectedDraw.isActive === true && diff <= 0) {
+      setDrawRemainingMs(null);
+      return;
+    }
+    setDrawRemainingMs(diff);
   }, [selectedDraw, currentTime, getSlotCloseAt, drawDate]);
 
   const formatRemaining = (ms) => {
@@ -3572,8 +3601,9 @@ function Center() {
     const secs = totalSec % 60;
     return `${hrs}h ${mins}m ${secs}s`;
   };
-  const isSelectedDrawClosed = () => Boolean(selectedDraw && (selectedDraw.isActive === false || selectedDraw.isExpired === true || isPastClosingTime()));
+  const isSelectedDrawClosed = () => Boolean(selectedDraw && isSlotClosed(selectedDraw));
   const isEntryLocked = Boolean(selectedDraw && isSelectedDrawClosed());
+  const pakistanTodayIso = getPakistanISODate(new Date());
 
   // Main Content
 
@@ -3733,6 +3763,12 @@ function Center() {
                 const closeAt = getSlotCloseAt(slot, drawDate);
                 const remaining = closeAt ? (closeAt.getTime() - currentTime.getTime()) : null;
                 const closed = isSlotClosed(slot);
+                const isAdminOpen = slot?.isActive === true;
+                const remainingLabel = closed
+                  ? 'Closed'
+                  : (isAdminOpen && remaining != null && remaining <= 0)
+                    ? 'Open'
+                    : formatRemainingVerbose(remaining);
                 return (
                   <MenuItem
                     key={slot._id}
@@ -3759,13 +3795,56 @@ function Center() {
                       {formatTimeSlotLabel(slot)}
                     </Typography>
                     <Typography sx={{ fontWeight: 700, fontSize: 13, color: closed ? '#ef4444' : '#ffffff' }}>
-                      {closed ? 'Closed' : formatRemainingVerbose(remaining)}
+                      {remainingLabel}
                     </Typography>
                   </MenuItem>
                 );
               })}
             </Menu>
-            <Box sx={{ bgcolor: 'var(--rlc-strip-black)', color: 'var(--rlc-strip-text)', borderRadius: 1, px: 1.3, py: 0.85, textAlign: 'center', fontWeight: 700 }}>{drawDate}</Box>
+            <Box
+              sx={{
+                bgcolor: 'var(--rlc-strip-black)',
+                color: 'var(--rlc-strip-text)',
+                borderRadius: 1,
+                px: 1.3,
+                py: 0.85,
+                textAlign: 'center',
+                fontWeight: 700,
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer',
+                '&:hover': { bgcolor: '#0b1220' },
+              }}
+              title="Select Date"
+            >
+              <span>{drawDate}</span>
+              <EventIcon
+                sx={{
+                  position: 'absolute',
+                  right: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 18,
+                  color: '#d1d5db',
+                  pointerEvents: 'none',
+                }}
+              />
+              <input
+                type="date"
+                value={drawDate}
+                max={pakistanTodayIso}
+                onChange={(e) => setDrawDate(e.target.value)}
+                aria-label="Select draw date"
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  width: '100%',
+                  height: '100%',
+                  opacity: 0,
+                  cursor: 'pointer',
+                }}
+              />
+            </Box>
             <Box sx={{ bgcolor: 'var(--rlc-strip-black)', color: 'var(--rlc-strip-text)', borderRadius: 1, px: 1.3, py: 0.85, textAlign: 'center', fontWeight: 700 }}>
               Closing In: {formatRemaining(drawRemainingMs)}
             </Box>
@@ -4000,7 +4079,7 @@ function Center() {
                     Selected draw is closed. Entry controls are disabled.
                   </Typography>
                 )}
-                <Box sx={{ display: 'flex', alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: { xs: 1, md: 1.25, lg: 1.5 }, flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
+                <Box sx={{ display: 'flex', alignItems: { xs: 'stretch', md: 'center' }, justifyContent: 'space-between', gap: { xs: 1, md: 1.25, lg: 1.5 }, flexWrap: { xs: 'wrap', lg: 'nowrap' } }}>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(130px, 1fr))', lg: 'minmax(180px, 1.15fr) minmax(125px, 1fr) minmax(125px, 1fr)' }, gap: 1, flex: 1, minWidth: 0 }}>
                     <TextField
                       inputRef={noInputRef}
@@ -4124,15 +4203,34 @@ function Center() {
                       disabled={isEntryLocked}
                     />
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'space-between', md: 'flex-end' }, gap: { xs: 1, md: 1.1 }, width: { xs: '100%', md: 'auto' }, minWidth: { md: 228 }, maxWidth: '100%', flexShrink: 0, pl: { md: 1 }, borderLeft: { md: '1px solid #cbd5e1' } }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'space-between', md: 'flex-end' }, gap: { xs: 1, md: 1.1 }, width: { xs: '100%', md: '100%', lg: 'auto' }, minWidth: { md: 0, lg: 252 }, maxWidth: '100%', flexShrink: 0, pl: { lg: 1 }, borderLeft: { lg: '1px solid #cbd5e1' }, flexWrap: { xs: 'nowrap', sm: 'nowrap' } }}>
                     <FormControlLabel
                       control={<Switch checked={autoMode} onChange={toggleAutoMode} color="primary" disabled={isEntryLocked} />}
-                      label="Auto Mode"
+                      label="Auto"
                       sx={{ mr: 0, ml: 0, maxWidth: '100%', '& .MuiSwitch-root': { mr: 0 }, '& .MuiFormControlLabel-label': { fontSize: { xs: 13, md: 13.5 }, fontWeight: 600, color: '#111827', lineHeight: 1, whiteSpace: 'nowrap' } }}
                     />
-                    <Button type="submit" variant="contained" disabled={isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, px: 1.8, height: 42, minWidth: 80, bgcolor: 'var(--rlc-success)', '&:hover': { bgcolor: 'var(--rlc-success-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
-                      Save
+                    <Button
+                      type="button"
+                      variant="contained"
+                      onClick={handleAKR2Figure3Jaga}
+                      disabled={isEntryLocked}
+                      sx={{
+                        fontSize: 14,
+                        fontWeight: 700,
+                        px: 1.8,
+                        height: 42,
+                        minWidth: 80,
+                        bgcolor: 'var(--rlc-primary)',
+                        textTransform: 'none',
+                        '&:hover': { bgcolor: 'var(--rlc-primary-hover)' },
+                        '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' },
+                      }}
+                    >
+                      F+M+B
                     </Button>
+                    {/* <Button type="submit" variant="contained" disabled={isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, px: 1.8, height: 42, minWidth: 80, bgcolor: 'var(--rlc-success)', '&:hover': { bgcolor: 'var(--rlc-success-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
+                      Save
+                    </Button> */}
                   </Box>
                 </Box>
               </Box>

@@ -25,9 +25,26 @@ import SaveIcon from '@mui/icons-material/Save';
 import ToggleOnIcon from '@mui/icons-material/ToggleOn';
 import ToggleOffIcon from '@mui/icons-material/ToggleOff';
 
+const getPakistanISODate = (value = new Date()) => {
+  const dateObj = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateObj.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(dateObj);
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  if (!year || !month || !day) return '';
+  return `${year}-${month}-${day}`;
+};
+
 const DrawList = () => {
   const [slots, setSlots] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(() => getPakistanISODate(new Date()));
   const [hour, setHour] = useState(11);
   const formatHourLabel = (h) => {
     const n = Number(h);
@@ -56,7 +73,7 @@ const DrawList = () => {
   const fetchSlots = async () => {
     try {
       setLoading(true);
-      const res = await axios.get('/api/v1/timeslots');
+      const res = await axios.get('/api/v1/timeslots', { params: { date: selectedDate } });
       setSlots(res.data.timeSlots || res.data || []);
     } catch (err) {
       console.error('Failed to load timeslots', err);
@@ -67,7 +84,7 @@ const DrawList = () => {
     }
   };
 
-  useEffect(() => { fetchSlots(); }, []);
+  useEffect(() => { fetchSlots(); }, [selectedDate]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -104,7 +121,7 @@ const DrawList = () => {
 
   const toggleActive = async (id, current) => {
     try {
-      await axios.put(`/api/v1/timeslots/${id}`, { isActive: !current });
+      await axios.put(`/api/v1/timeslots/${id}`, { isActive: !current, date: selectedDate });
       toast.success('Updated');
       await fetchSlots();
       broadcastTimeSlotsUpdated();
@@ -117,7 +134,17 @@ const DrawList = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-        <h2>TimeSlots (Admin)</h2>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <h2 style={{ margin: 0 }}>TimeSlots (Admin)</h2>
+          <TextField
+            type="date"
+            size="small"
+            label="Date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value || getPakistanISODate(new Date()))}
+            InputLabelProps={{ shrink: true }}
+          />
+        </Box>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => { setHour(11); setLabel(formatHourLabel(11)); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>
           New
         </Button>
@@ -143,7 +170,7 @@ const DrawList = () => {
           <TableRow>
             <TableCell>Hour</TableCell>
             <TableCell>Label</TableCell>
-            <TableCell>Active</TableCell>
+            <TableCell>Active ({selectedDate})</TableCell>
             <TableCell>Actions</TableCell>
           </TableRow>
         </TableHead>
@@ -176,10 +203,6 @@ const DrawList = () => {
           </FormControl>
 
           <TextField label="Label" value={editSlot?.label || ''} InputProps={{ readOnly: true }} />
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <span>Active</span>
-            <Switch checked={!!editSlot?.isActive} onChange={(e) => setEditSlot(prev => ({ ...prev, isActive: e.target.checked }))} />
-          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditOpen(false)}>Cancel</Button>
