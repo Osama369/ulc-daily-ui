@@ -4235,7 +4235,6 @@ function Center() {
                 </Box>
               </Box>
             )}
-
           </Paper>
         </Box>
 

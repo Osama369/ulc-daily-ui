@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import {
@@ -42,20 +42,48 @@ const WinningNumbers = () => {
   const [deleteIndex, setDeleteIndex] = useState(null);
   const [editDraft, setEditDraft] = useState({ number: '', type: 'second' });
 
-  // Fetch available draws for selection
+  const fetchTimeSlots = useCallback(async () => {
+    try {
+      // Fetch date-aware timeslots so active/closed reflects admin date overrides.
+      const res = await axios.get('/api/v1/timeslots', {
+        params: { date: drawDate },
+      });
+      const nextDraws = res.data.timeSlots || res.data || [];
+      setDraws(nextDraws);
+      setSelectedDraw((prev) => {
+        if (!prev?._id) return prev;
+        const refreshed = nextDraws.find((d) => String(d._id) === String(prev._id));
+        return refreshed || null;
+      });
+    } catch (err) {
+      console.error('Failed to fetch timeslots', err);
+      setDraws([]);
+    }
+  }, [drawDate]);
+
+  // Fetch available draws for selection and keep in sync with selected date.
   useEffect(() => {
-    const fetchTimeSlots = async () => {
-      try {
-        // fetch all timeslots so we can show active and closed
-        const res = await axios.get('/api/v1/timeslots');
-        setDraws(res.data.timeSlots || res.data || []);
-      } catch (err) {
-        console.error('Failed to fetch timeslots', err);
-        setDraws([]);
-      }
-    };
     fetchTimeSlots();
-  }, []);
+  }, [fetchTimeSlots]);
+
+  // Live refresh when admin updates timeslots from DrawList or another tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onTimeSlotsUpdated = () => { fetchTimeSlots(); };
+    const onStorage = (e) => {
+      if (e.key === 'timeslots:lastUpdated') fetchTimeSlots();
+    };
+    const onFocus = () => { fetchTimeSlots(); };
+
+    window.addEventListener('timeslots:updated', onTimeSlotsUpdated);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('timeslots:updated', onTimeSlotsUpdated);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [fetchTimeSlots]);
 
     const formatHourLabel = (h) => {
       if (h === null || typeof h === 'undefined') return '';
