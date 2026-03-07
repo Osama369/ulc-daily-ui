@@ -3150,6 +3150,15 @@ function Center() {
     // }
     // Handle patterns like +4+6, +34+, etc.
     if (cleanEntry.includes('+')) {
+      // +NN means match positions 2 and 3 in a 4-digit winning number.
+      // Example: +13 matches 0137 because win.slice(1, 3) === "13".
+      if (cleanEntry.length === 3 && cleanEntry.match(/^\+\d\d$/)) {
+        const digits = cleanEntry.slice(1);
+        if (win.slice(1, 3) === digits) {
+          return true;
+        }
+      }
+
       // For 2-digit patterns like +4+6
       if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\+\d$/)) {
         const digit1 = cleanEntry[1]; // 4
