@@ -242,13 +242,24 @@ const Reports = () => {
   );
 
   useEffect(() => {
+    if (dailyBillAllClosed) return;
     if (!selectedDraw) {
       if (closedDraws.length) setSelectedDraw(closedDraws[0]);
       return;
     }
     const exists = closedDraws.some((d) => String(d._id) === String(selectedDraw._id));
     if (!exists) setSelectedDraw(closedDraws[0] || null);
-  }, [selectedDraw, closedDraws]);
+  }, [selectedDraw, closedDraws, dailyBillAllClosed]);
+
+  useEffect(() => {
+    // All-closed aggregation is only valid in DAILY BILL mode.
+    if (ledger !== 'DAILY BILL' && dailyBillAllClosed) {
+      setDailyBillAllClosed(false);
+      if (!selectedDraw && closedDraws.length) {
+        setSelectedDraw(closedDraws[0]);
+      }
+    }
+  }, [ledger, dailyBillAllClosed, selectedDraw, closedDraws]);
 
   // Helper to build daily bill result without mutating component state
   const buildDailyBillResult = async (dateParam = drawDate) => {
@@ -310,7 +321,13 @@ const Reports = () => {
           if (!d?.draw_date) return true;
           return toISODate(d.draw_date) === dateISO;
         })
-        .sort((a, b) => Number(a.hour ?? 0) - Number(b.hour ?? 0));
+        .sort((a, b) => {
+          const aa = getSlotHourMinute(a);
+          const bb = getSlotHourMinute(b);
+          const av = (aa?.hour24 ?? 0) * 60 + (aa?.minute ?? 0);
+          const bv = (bb?.hour24 ?? 0) * 60 + (bb?.minute ?? 0);
+          return av - bv;
+        });
       if (targetDraws.length === 0) return null;
     } else {
       if (!selectedDraw || !selectedDraw._id) return null;
@@ -332,6 +349,8 @@ const Reports = () => {
       : [role === 'user' ? currentUserId : selectedClient].filter(Boolean);
 
     if (!sourceUserIds.length) return null;
+
+    let hasAnyDrawData = false;
 
     for (const draw of targetDraws) {
       const winningNumbersForDraw = await fetchWinningNumbersForDraw(dateParam, draw);
@@ -409,11 +428,6 @@ const Reports = () => {
         let allRows = [];
         fetchedEntries.forEach(e => { if (Array.isArray(e.data)) allRows.push(...e.data); });
         if (allRows.length === 0) {
-          result.drawRows.push({
-            drawId: draw._id,
-            drawName: formatTimeSlotLabel(draw),
-            first: 0, second: 0, sale: 0, prize: 0, commission: 0, safi: 0, hissa: 0, subTotal: 0,
-          });
           continue;
         }
 
@@ -448,13 +462,9 @@ const Reports = () => {
 
       const sale = firstSale + secondSale;
       if (sale === 0 && prize === 0) {
-        result.drawRows.push({
-          drawId: draw._id,
-          drawName: formatTimeSlotLabel(draw),
-          first: 0, second: 0, sale: 0, prize: 0, commission: 0, safi: 0, hissa: 0, subTotal: 0,
-        });
         continue;
       }
+      hasAnyDrawData = true;
       const commission = Object.entries(categorySaleTotals).reduce(
         (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
         0
@@ -497,7 +507,8 @@ const Reports = () => {
       result.totals.bill = result.totals.subTotal + result.totals.hissa;
     }
 
-    return result.drawRows.length > 0 ? result : null;
+    if (!hasAnyDrawData || result.drawRows.length === 0) return null;
+    return result;
   };
   // Numeric helpers: avoid floating point drift and format consistently
   const toCents = (v) => Math.round((Number(v) || 0) * 100);
@@ -529,6 +540,15 @@ const Reports = () => {
     // }
     // Handle patterns like +4+6, +34+, etc.
     if (cleanEntry.includes('+')) {
+      // +NN means match positions 2 and 3 in a 4-digit winning number.
+      // Example: +13 matches 0137 because win.slice(1, 3) === "13".
+      if (cleanEntry.length === 3 && cleanEntry.match(/^\+\d\d$/)) {
+        const digits = cleanEntry.slice(1);
+        if (win.slice(1, 3) === digits) {
+          return true;
+        }
+      }
+
       // For 2-digit patterns like +4+6
       if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\+\d$/)) {
         const digit1 = cleanEntry[1]; // 4
@@ -1369,7 +1389,7 @@ const Reports = () => {
         // Function to draw table header
         const drawTableHeader = (x, y) => {
           doc.setFont("helvetica", "bold");
-          doc.setFontSize(8);
+          doc.setFontSize(8.8);
   
           doc.rect(x, y, colWidths[0], rowHeight);
           doc.text("Number", x + 1, y + 5);
@@ -1394,8 +1414,8 @@ const Reports = () => {
   
         // Synchronized drawing of all three tables
         let currentY = headerY;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.7);
   
         const maxRows = Math.max(leftRows.length, middleRows.length, rightRows.length);
   
@@ -1422,8 +1442,8 @@ const Reports = () => {
             }
   
             currentY += rowHeight;
-            doc.setFont("helvetica", "normal");
-            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8.7);
           }
   
           // Draw left table row
@@ -1582,9 +1602,13 @@ const Reports = () => {
         toast('Please select a client');
         return;
       }
-      const result = await buildDailyBillResult(drawDate, drawTime);
-      if (!result) {
-        toast('No record found for the selected date.');
+      if (!dailyBillAllClosed && (!selectedDraw || !selectedDraw._id)) {
+        toast('Please select a time slot');
+        return;
+      }
+      const result = await buildDailyBillResult(drawDate);
+      if (!result || !isDailyBillResultMeaningful(result)) {
+        toast('No records found for selected date');
         return;
       }
 
@@ -1674,13 +1698,22 @@ const Reports = () => {
   // Compute daily bill values and keep in state for UI display
   const [dailyBill, setDailyBill] = useState(null);
 
+  const isDailyBillResultMeaningful = (result) => {
+    if (!result || !Array.isArray(result.drawRows) || result.drawRows.length === 0) return false;
+    return result.drawRows.some((row) => (Number(row?.sale) || 0) > 0 || (Number(row?.prize) || 0) > 0);
+  };
+
   const computeDailyBill = async () => {
     if (role !== 'user' && !selectedClient) {
       toast('Please select a client');
       return;
     }
-    const result = await buildDailyBillResult(drawDate, drawTime);
-    if (!result) {
+    if (!dailyBillAllClosed && (!selectedDraw || !selectedDraw._id)) {
+      toast('Please select a time slot');
+      return;
+    }
+    const result = await buildDailyBillResult(drawDate);
+    if (!result || !isDailyBillResultMeaningful(result)) {
       toast('No records found for selected date');
       setDailyBill(null);
       return;
@@ -1726,13 +1759,22 @@ const Reports = () => {
         </div>
         <div className="min-w-[200px] flex-1">
           <label className="block mb-1 text-sm font-semibold uppercase tracking-wide text-[#374151]">Draw Name</label>
-          <select value={selectedDraw?._id || ""} onChange={e => {
+          <select value={dailyBillAllClosed ? ALL_CLOSED_DRAWS : (selectedDraw?._id || "")} onChange={e => {
             const id = e.target.value;
+            if (id === ALL_CLOSED_DRAWS) {
+              setDailyBillAllClosed(true);
+              setSelectedDraw(null);
+              return;
+            }
+            setDailyBillAllClosed(false);
             const d = closedDraws.find(x => String(x._id) === String(id)) || null;
             setSelectedDraw(d);
             if (d && d.draw_date) setDrawDate(toLocalISODate(d.draw_date));
           }} className="px-3 py-2 rounded border w-full" style={{ background: '#fff', color: 'var(--rlc-header-text)', borderColor: '#9ca3af' }}>
-            <option value="">{closedDraws.length ? '-- Select Closed Time Slot --' : '-- No Closed Time Slot --'}</option>
+            <option value="">-- Select time slot --</option>
+            {ledger === 'DAILY BILL' && (
+              <option value={ALL_CLOSED_DRAWS}>All Closed Draws</option>
+            )}
             {closedDraws.map(d => (
               <option key={d._id} value={d._id}>{`${formatTimeSlotLabel(d)} (Closed)`}</option>
             ))}

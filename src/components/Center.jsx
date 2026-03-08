@@ -33,6 +33,7 @@ const getPakistanISODate = (value = new Date()) => {
 };
 
 function Center() {
+  const ALL_CLOSED_DRAWS = '__ALL_CLOSED_DRAWS__';
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const userData = useSelector((state) => state.user);
@@ -49,6 +50,7 @@ function Center() {
   const [draws, setDraws] = useState([]);
   const [selectedDraw, setSelectedDraw] = useState(null);
   const [selectedClosedDrawForPrint, setSelectedClosedDrawForPrint] = useState(null);
+  const [dailyBillAllClosedForPrint, setDailyBillAllClosedForPrint] = useState(false);
   const [drawRemainingMs, setDrawRemainingMs] = useState(null);
   const [drawDate, setDrawDate] = useState(() => getPakistanISODate(new Date()));
   const [drawTime, setDrawTime] = useState("");
@@ -2879,11 +2881,6 @@ function Center() {
         if (currentY > 280) {
           doc.addPage();
 
-          // Add section header on new page
-          doc.setFont("helvetica", "bold");
-          doc.setFontSize(14);
-          doc.text(title + " (continued...)", 14, 20);
-
           // Reset Y position and redraw ALL table headers
           currentY = 35;
 
@@ -3314,13 +3311,17 @@ function Center() {
 
   const handleDownloadPDF = async () => {
     const drawForPrint = selectedClosedDrawForPrint;
-    if (!drawForPrint) {
-      toast.error("Please select a closed draw in Draw Name before printing.");
-      return;
-    }
-    if (!isSlotClosed(drawForPrint)) {
-      toast.error("Selected draw is not closed yet.");
-      return;
+    const isDailyBillAllClosed = ledger === 'DAILY BILL' && dailyBillAllClosedForPrint;
+
+    if (!isDailyBillAllClosed) {
+      if (!drawForPrint) {
+        toast.error("Please select a closed draw in Draw Name before printing.");
+        return;
+      }
+      if (!isSlotClosed(drawForPrint)) {
+        toast.error("Selected draw is not closed yet.");
+        return;
+      }
     }
 
     try {
@@ -3329,7 +3330,7 @@ function Center() {
         handlers: {
           VOUCHER: () => generateVoucherPDF(undefined, drawForPrint),
           LEDGER: () => generateLedgerPDF(drawForPrint),
-          "DAILY BILL": () => generateDailyBillPDF(drawForPrint),
+          "DAILY BILL": () => generateDailyBillPDF(drawForPrint, { allClosed: isDailyBillAllClosed }),
           COMBINED: () => generateCombinedVoucherPDF(),
           "COMBINED DEMAND": () => generateCombinedVoucherPDF("demand"),
           "COMBINED OVER LIMIT": () => generateCombinedVoucherPDF("overlimit"),
@@ -3344,7 +3345,8 @@ function Center() {
     }
   };
 
-  const generateDailyBillPDF = async (drawForPrint = selectedDraw) => {
+  const generateDailyBillPDF = async (drawForPrint = selectedDraw, options = {}) => {
+    const allClosed = Boolean(options?.allClosed);
     const selectedUser = userData?.user || {};
     const hissaShare = (Number(selectedUser.commission ?? 0) || 0) / 100;
     const multipliers = {
@@ -3386,78 +3388,130 @@ function Center() {
       }
     };
 
-    const fetchedEntries = await fetchVoucherData(drawDate, drawForPrint?._id);
-    if (!Array.isArray(fetchedEntries) || fetchedEntries.length === 0) {
-      toast("No record found for the selected date.");
-      return;
+    let targetDraws = [];
+    if (allClosed) {
+      const dateISO = toLocalISODate(drawDate) || drawDate;
+      targetDraws = (closedDraws || [])
+        .filter((d) => {
+          if (!d?.draw_date) return true;
+          return toLocalISODate(d.draw_date) === dateISO;
+        })
+        .sort((a, b) => {
+          const aa = getSlotHourMinute(a);
+          const bb = getSlotHourMinute(b);
+          const av = (aa?.hour24 ?? 0) * 60 + (aa?.minute ?? 0);
+          const bv = (bb?.hour24 ?? 0) * 60 + (bb?.minute ?? 0);
+          return av - bv;
+        });
+      if (!targetDraws.length) {
+        toast('No records found for selected date');
+        return;
+      }
+    } else {
+      if (!drawForPrint || !drawForPrint._id) {
+        toast.error('Please select a closed draw in Draw Name before printing.');
+        return;
+      }
+      targetDraws = [drawForPrint];
     }
 
-    const allRows = [];
-    fetchedEntries.forEach((entry) => {
-      if (Array.isArray(entry?.data)) allRows.push(...entry.data);
-    });
-
-    const winningNumbersForDraw = await fetchWinningNumbersForDraw(drawDate, drawForPrint);
-    const rowsByCategory = { HINSA: [], AKRA: [], TANDOLA: [], PANGORA: [] };
-
-    allRows.forEach((r) => {
-      const num = String(r.uniqueId || r.number || r.no || "");
-      const first = Number(r.firstPrice ?? r.f ?? 0) || 0;
-      const second = Number(r.secondPrice ?? r.s ?? 0) || 0;
-      const cat = categorize(num);
-      if (cat in rowsByCategory) rowsByCategory[cat].push([num, first, second]);
-    });
-
-    let firstSale = 0;
-    let secondSale = 0;
-    let prize = 0;
-    const categorySaleTotals = { HINSA: 0, AKRA: 0, TANDOLA: 0, PANGORA: 0 };
     const secondPrizeDivisor = 3;
-
-    Object.entries(rowsByCategory).forEach(([cat, rows]) => {
-      const catFirst = rows.reduce((acc, [, f]) => acc + (Number(f) || 0), 0);
-      const catSecond = rows.reduce((acc, [, , s]) => acc + (Number(s) || 0), 0);
-      const catSale = catFirst + catSecond;
-      firstSale += catFirst;
-      secondSale += catSecond;
-      categorySaleTotals[cat] += catSale;
-
-      const multiplier = Number(multipliers[cat]) || 1;
-      rows.forEach(([num, f, s]) => {
-        for (const winning of winningNumbersForDraw) {
-          if (num === winning.number || checkPositionalMatch(num, winning.number)) {
-            if (winning.type === "first") prize += (Number(f) || 0) * multiplier;
-            else if (winning.type === "second" || winning.type === "third") prize += ((Number(s) || 0) * multiplier) / secondPrizeDivisor;
-          }
-        }
-      });
-    });
-
-    const sale = firstSale + secondSale;
-    const commission = Object.entries(categorySaleTotals).reduce(
-      (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
-      0
-    );
-    const safi = sale - commission;
-    const subTotal = safi - prize;
-    const hissa = Math.abs(subTotal) * hissaShare;
-    const bill = subTotal >= 0 ? subTotal - hissa : subTotal + hissa;
-
     const result = {
-      drawRows: [
-        {
-          drawId: drawForPrint?._id || null,
-          drawName: formatTimeSlotLabel(drawForPrint) || "Draw",
-          sale,
-          prize,
-        },
-      ],
-      totals: { sale, safi, prize, subTotal, commission, hissa, bill },
+      drawRows: [],
+      totals: { first: 0, second: 0, sale: 0, prize: 0, commission: 0, safi: 0, hissa: 0, subTotal: 0, bill: 0 },
       meta: {
         commissionLabel: `${rates.HINSA}%-${rates.AKRA}%-${rates.TANDOLA}%-${rates.PANGORA}%`,
         hissaPercent: hissaShare * 100,
       },
     };
+
+    let hasAnyDrawData = false;
+
+    for (const draw of targetDraws) {
+      const fetchedEntries = await fetchVoucherData(drawDate, draw?._id);
+      const allRows = [];
+      (fetchedEntries || []).forEach((entry) => {
+        if (Array.isArray(entry?.data)) allRows.push(...entry.data);
+      });
+      if (allRows.length === 0) {
+        continue;
+      }
+
+      const winningNumbersForDraw = await fetchWinningNumbersForDraw(drawDate, draw);
+      const rowsByCategory = { HINSA: [], AKRA: [], TANDOLA: [], PANGORA: [] };
+
+      allRows.forEach((r) => {
+        const num = String(r.uniqueId || r.number || r.no || '');
+        const first = Number(r.firstPrice ?? r.f ?? 0) || 0;
+        const second = Number(r.secondPrice ?? r.s ?? 0) || 0;
+        const cat = categorize(num);
+        if (cat in rowsByCategory) rowsByCategory[cat].push([num, first, second]);
+      });
+
+      let firstSale = 0;
+      let secondSale = 0;
+      let prize = 0;
+      const categorySaleTotals = { HINSA: 0, AKRA: 0, TANDOLA: 0, PANGORA: 0 };
+
+      Object.entries(rowsByCategory).forEach(([cat, rows]) => {
+        const catFirst = rows.reduce((acc, [, f]) => acc + (Number(f) || 0), 0);
+        const catSecond = rows.reduce((acc, [, , s]) => acc + (Number(s) || 0), 0);
+        const catSale = catFirst + catSecond;
+        firstSale += catFirst;
+        secondSale += catSecond;
+        categorySaleTotals[cat] += catSale;
+
+        const multiplier = Number(multipliers[cat]) || 1;
+        rows.forEach(([num, f, s]) => {
+          for (const winning of winningNumbersForDraw) {
+            if (num === winning.number || checkPositionalMatch(num, winning.number)) {
+              if (winning.type === 'first') prize += (Number(f) || 0) * multiplier;
+              else if (winning.type === 'second' || winning.type === 'third') prize += ((Number(s) || 0) * multiplier) / secondPrizeDivisor;
+            }
+          }
+        });
+      });
+
+      const sale = firstSale + secondSale;
+      if (sale === 0 && prize === 0) {
+        continue;
+      }
+      hasAnyDrawData = true;
+      const commission = Object.entries(categorySaleTotals).reduce(
+        (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
+        0
+      );
+      const safi = sale - commission;
+      const subTotal = safi - prize;
+      const hissa = Math.abs(subTotal) * hissaShare;
+
+      result.drawRows.push({
+        drawId: draw?._id || null,
+        drawName: formatTimeSlotLabel(draw) || 'Draw',
+        sale,
+        prize,
+      });
+
+      result.totals.first += firstSale;
+      result.totals.second += secondSale;
+      result.totals.sale += sale;
+      result.totals.prize += prize;
+      result.totals.commission += commission;
+      result.totals.subTotal += subTotal;
+      result.totals.hissa += hissa;
+    }
+
+    if (!hasAnyDrawData || result.drawRows.length === 0) {
+      toast('No records found for selected date');
+      return;
+    }
+
+    result.totals.safi = result.totals.sale - result.totals.commission;
+    result.totals.subTotal = result.totals.safi - result.totals.prize;
+    result.totals.hissa = Math.abs(result.totals.subTotal) * hissaShare;
+    result.totals.bill = result.totals.subTotal >= 0
+      ? result.totals.subTotal - result.totals.hissa
+      : result.totals.subTotal + result.totals.hissa;
 
     const doc = new jsPDF("p", "mm", "a4");
     const pageWidth = doc.internal.pageSize.width;
@@ -3568,10 +3622,18 @@ function Center() {
 
   useEffect(() => {
     // Keep print slot selection valid when draw list/status changes
+    if (dailyBillAllClosedForPrint) return;
     if (!selectedClosedDrawForPrint) return;
     const exists = closedDraws.some((d) => String(d._id) === String(selectedClosedDrawForPrint._id));
     if (!exists) setSelectedClosedDrawForPrint(null);
-  }, [selectedClosedDrawForPrint, closedDraws]);
+  }, [selectedClosedDrawForPrint, closedDraws, dailyBillAllClosedForPrint]);
+
+  useEffect(() => {
+    // All-closed mode is only valid in DAILY BILL report type.
+    if (ledger !== 'DAILY BILL' && dailyBillAllClosedForPrint) {
+      setDailyBillAllClosedForPrint(false);
+    }
+  }, [ledger, dailyBillAllClosedForPrint]);
 
   const isPastClosingTime = () => {
     if (!selectedDraw) return false;
@@ -3661,9 +3723,17 @@ function Center() {
 
                 <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Draw Name:</Typography>
                 <select
-                  value={selectedClosedDrawForPrint?._id || ""}
+                  value={dailyBillAllClosedForPrint ? ALL_CLOSED_DRAWS : (selectedClosedDrawForPrint?._id || "")}
                   onChange={(e) => {
-                    const d = closedDraws.find(x => String(x._id) === String(e.target.value));
+                    const value = e.target.value;
+                    if (value === ALL_CLOSED_DRAWS) {
+                      setDailyBillAllClosedForPrint(true);
+                      setSelectedClosedDrawForPrint(null);
+                      return;
+                    }
+
+                    setDailyBillAllClosedForPrint(false);
+                    const d = closedDraws.find(x => String(x._id) === String(value));
                     setSelectedClosedDrawForPrint(d || null);
                     if (d?.draw_date) {
                       const iso = toLocalISODate(d.draw_date);
@@ -3674,8 +3744,13 @@ function Center() {
                   style={{ background: '#f3f4f6', color: '#111827', padding: '7px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '34px', fontWeight: 700 }}
                 >
                   <option value="" style={{ color: '#111827' }}>
-                    {closedDraws.length ? '-- Select Closed Time Slot --' : '-- No Closed Time Slot --'}
+                    -- Select time slot --
                   </option>
+                  {ledger === 'DAILY BILL' && (
+                    <option value={ALL_CLOSED_DRAWS} style={{ color: '#000' }}>
+                      All Closed Draws
+                    </option>
+                  )}
                   {closedDraws.map(d => (
                     <option key={d._id} value={d._id} style={{ color: '#000' }}>
                       {formatTimeSlotLabel(d)} (Closed)
