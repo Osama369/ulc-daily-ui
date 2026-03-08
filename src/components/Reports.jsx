@@ -577,6 +577,15 @@ const Reports = () => {
         }
       }
 
+      // For patterns like 6++8 (positions 1 and 4)
+      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\+\+\d$/)) {
+        const firstDigit = cleanEntry[0];
+        const lastDigit = cleanEntry[3];
+        if (winningNumber[0] === firstDigit && winningNumber[3] === lastDigit) {
+          return true;
+        }
+      }
+
       // For patterns like ++56 (last two positions)
       if (cleanEntry.length === 4 && cleanEntry.match(/^\+\+\d\d$/)) {
         const digits = cleanEntry.slice(2); // "56"

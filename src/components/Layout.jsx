@@ -41,6 +41,13 @@ const Layout = () => {
   const [activeTab, setActiveTab] = useState("Sell Department");
   const [selectedUserId, setSelectedUserId] = useState(null); // Add state for selected user ID
   const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [headerSummary, setHeaderSummary] = useState({
+    balance: 0,
+    count: 0,
+    total: 0,
+    first: 0,
+    second: 0,
+  });
   const drawerWidth = 240;
 
   // Keep layout in sync with URL so routes like /manage-users render inside the dashboard
@@ -91,9 +98,17 @@ const Layout = () => {
           drawerWidth={drawerWidth}
           sidebarVisible={sidebarVisible}
           onToggleSidebar={() => setSidebarVisible(v => !v)}
+          summaryStats={headerSummary}
+          showSummary={activeTab === 'Sell Department'}
         />
         <Toolbar />
-        {activeTab === "Sell Department" && <Center onToggleSidebar={() => setSidebarVisible(v => !v)} sidebarVisible={sidebarVisible} />}
+        {activeTab === "Sell Department" && (
+          <Center
+            onToggleSidebar={() => setSidebarVisible(v => !v)}
+            sidebarVisible={sidebarVisible}
+            onSummaryChange={setHeaderSummary}
+          />
+        )}
        {/* {activeTab === "Purchase Department" && <PurchaseDepartment />} */}
         {activeTab === "manage-users" && <DistributerUsers onEditUser={(userId) => {
           console.log("Editing user with ID:", userId);

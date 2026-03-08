@@ -32,7 +32,7 @@ const getPakistanISODate = (value = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-function Center() {
+function Center({ onSummaryChange }) {
   const ALL_CLOSED_DRAWS = '__ALL_CLOSED_DRAWS__';
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -71,6 +71,30 @@ function Center() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  const distributorRecordCount = entries.length;
+  const distributorFirstTotal = entries.reduce((sum, e) => sum + (Number(e.f) || 0), 0);
+  const distributorSecondTotal = entries.reduce((sum, e) => sum + (Number(e.s) || 0), 0);
+  const distributorGrandTotal = distributorFirstTotal + distributorSecondTotal;
+
+  useEffect(() => {
+    if (typeof onSummaryChange !== 'function') return;
+    const parsedBalance = Number(userData?.user?.balance);
+    onSummaryChange({
+      balance: Number.isFinite(parsedBalance) ? parsedBalance : 0,
+      count: distributorRecordCount,
+      total: distributorGrandTotal,
+      first: distributorFirstTotal,
+      second: distributorSecondTotal,
+    });
+  }, [
+    onSummaryChange,
+    userData?.user?.balance,
+    distributorRecordCount,
+    distributorGrandTotal,
+    distributorFirstTotal,
+    distributorSecondTotal,
+  ]);
 
   // Helper: format a timeslot object to 12-hour label (e.g. 13 -> "1PM" or label "13:00" -> "1PM")
   const formatTimeSlotLabel = (slot) => {
@@ -949,12 +973,6 @@ function Center() {
   if (error) {
     return <p className="text-center text-red-600">{error}</p>;
   }
-
-  // Distributor summary values derived from current `entries`
-  const distributorRecordCount = entries.length;
-  const distributorFirstTotal = entries.reduce((sum, e) => sum + (Number(e.f) || 0), 0);
-  const distributorSecondTotal = entries.reduce((sum, e) => sum + (Number(e.s) || 0), 0);
-  const distributorGrandTotal = distributorFirstTotal + distributorSecondTotal;
 
   const parseRlcDbf = async (file) => {
     const buf = await file.arrayBuffer();
@@ -3184,6 +3202,15 @@ function Center() {
         }
       }
 
+      // For patterns like 6++8 (positions 1 and 4)
+      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\+\+\d$/)) {
+        const firstDigit = cleanEntry[0];
+        const lastDigit = cleanEntry[3];
+        if (winningNumber[0] === firstDigit && winningNumber[3] === lastDigit) {
+          return true;
+        }
+      }
+
       // For patterns like ++56 (last two positions)
       if (cleanEntry.length === 4 && cleanEntry.match(/^\+\+\d\d$/)) {
         const digits = cleanEntry.slice(2); // "56"
@@ -3682,37 +3709,37 @@ function Center() {
 
 
   return (
-    <div className="flex-1 flex flex-col overflow-y-auto overflow-x-hidden w-full" style={{ minHeight: 'calc(100vh - 96px)', width: '100%', boxSizing: 'border-box', paddingLeft: 0, background: 'var(--rlc-page-bg)' }}>
+    <div className="flex-1 flex flex-col overflow-x-hidden w-full" style={{ minHeight: 'calc(100vh - 96px)', width: '100%', boxSizing: 'border-box', paddingLeft: 0, background: 'var(--rlc-page-bg)', overflowY: 'hidden' }}>
 
-      <Box sx={{ width: '100%', maxWidth: 1320, mx: 0, mt: 1.25, px: { xs: 1.25, sm: 2 } }}>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.6fr) minmax(0, 1fr)', lg: 'minmax(0, 1.55fr) minmax(0, 0.95fr) minmax(270px, 0.9fr)' }, gap: 1.75, alignItems: 'start' }}>
-          <Box component={Paper} sx={{ width: '100%', bgcolor: 'var(--rlc-card-green)', color: '#fff', p: { xs: 1, md: 1.15 }, borderRadius: 1.5, border: '1px solid var(--rlc-card-green-dark)' }}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.1 }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: '72px 1fr', alignItems: 'center', gap: 0.7, rowGap: 0.8 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Name:</Typography>
-                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1.1, py: 0.55, borderRadius: 0.8, fontWeight: 700, minHeight: 34, display: 'flex', alignItems: 'center' }}>
+      <Box sx={{ width: '100%', maxWidth: 1320, mx: 0, mt: 0.16, px: { xs: 1.25, sm: 2 } }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.6fr) minmax(0, 1fr)', lg: 'minmax(0, 1.55fr) minmax(0, 0.95fr) minmax(270px, 0.9fr)' }, gap: 0.9, alignItems: 'start' }}>
+          <Box component={Paper} sx={{ width: '100%', bgcolor: 'var(--rlc-card-green)', color: '#fff', p: { xs: 0.7, md: 0.78 }, borderRadius: 1.35, border: '1px solid var(--rlc-card-green-dark)' }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 0.7 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '72px 1fr', alignItems: 'center', gap: 0.45, rowGap: 0.5 }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Name:</Typography>
+                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1, py: 0.32, borderRadius: 0.75, fontWeight: 700, minHeight: 28, display: 'flex', alignItems: 'center' }}>
                   {String(userData?.user?.username || '').toUpperCase() || '-'}
                 </Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>City:</Typography>
-                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1.1, py: 0.55, borderRadius: 0.8, fontWeight: 700, minHeight: 34, display: 'flex', alignItems: 'center' }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>City:</Typography>
+                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1, py: 0.32, borderRadius: 0.75, fontWeight: 700, minHeight: 28, display: 'flex', alignItems: 'center' }}>
                   {String(userData?.user?.city || '').toUpperCase() || '-'}
                 </Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Dealer ID:</Typography>
-                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1.1, py: 0.55, borderRadius: 0.8, fontWeight: 700, minHeight: 34, display: 'flex', alignItems: 'center' }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Dealer ID:</Typography>
+                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1, py: 0.32, borderRadius: 0.75, fontWeight: 700, minHeight: 28, display: 'flex', alignItems: 'center' }}>
                   {String(userData?.user?.dealerId || '-').toUpperCase()}
                 </Box>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Balance:</Typography>
-                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1.1, py: 0.55, borderRadius: 0.8, fontWeight: 700, minHeight: 34, display: 'flex', alignItems: 'center' }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Balance:</Typography>
+                <Box sx={{ bgcolor: '#f3f4f6', color: '#111827', px: 1, py: 0.32, borderRadius: 0.75, fontWeight: 700, minHeight: 28, display: 'flex', alignItems: 'center' }}>
                   {(() => { const raw = userData?.user?.balance; const num = Number(raw); return !isNaN(num) ? `Rs. ${num.toLocaleString()}` : (raw ?? '-'); })()}
                 </Box>
               </Box>
 
-              <Box sx={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'center', gap: 0.7, rowGap: 0.8 }}>
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Type:</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '80px 1fr', alignItems: 'center', gap: 0.45, rowGap: 0.5 }}>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Type:</Typography>
                 <select
                   value={ledger}
                   onChange={(e) => setLedger(e.target.value)}
-                  style={{ background: '#f3f4f6', color: '#111827', padding: '7px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '34px', fontWeight: 700 }}
+                  style={{ background: '#f3f4f6', color: '#111827', padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '28px', fontWeight: 700, fontSize: '0.95rem' }}
                 >
                   {REPORT_TYPE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -3721,7 +3748,7 @@ function Center() {
                   ))}
                 </select>
 
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Draw Name:</Typography>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Draw Name:</Typography>
                 <select
                   value={dailyBillAllClosedForPrint ? ALL_CLOSED_DRAWS : (selectedClosedDrawForPrint?._id || "")}
                   onChange={(e) => {
@@ -3741,7 +3768,7 @@ function Center() {
                     }
                     if (d && d.isActive === false) toast.error('Time slot is closed');
                   }}
-                  style={{ background: '#f3f4f6', color: '#111827', padding: '7px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '34px', fontWeight: 700 }}
+                  style={{ background: '#f3f4f6', color: '#111827', padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '28px', fontWeight: 700, fontSize: '0.95rem' }}
                 >
                   <option value="" style={{ color: '#111827' }}>
                     -- Select time slot --
@@ -3758,20 +3785,20 @@ function Center() {
                   ))}
                 </select>
 
-                <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Draw Date:</Typography>
+                <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Draw Date:</Typography>
                 <input
                   type="date"
                   value={drawDate}
                   onChange={(e) => setDrawDate(e.target.value)}
-                  style={{ background: '#f3f4f6', color: '#111827', padding: '7px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '34px', fontWeight: 700 }}
+                  style={{ background: '#f3f4f6', color: '#111827', padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '28px', fontWeight: 700, fontSize: '0.95rem' }}
                 />
 
-                <Box sx={{ gridColumn: '1 / -1', pt: 0.2 }}>
+                <Box sx={{ gridColumn: '1 / -1', pt: 0.05 }}>
                   <Button
                     fullWidth
                     variant="contained"
                     onClick={handleDownloadPDF}
-                    sx={{ minHeight: 34, bgcolor: '#020617', color: '#fff', fontWeight: 800, textTransform: 'none', '&:hover': { bgcolor: '#000000' } }}
+                    sx={{ minHeight: 28, bgcolor: '#020617', color: '#fff', fontWeight: 800, textTransform: 'none', '&:hover': { bgcolor: '#000000' } }}
                   >
                     Print
                   </Button>
@@ -3779,45 +3806,21 @@ function Center() {
               </Box>
             </Box>
 
-            <Box sx={{ mt: 1.1, display: 'flex', alignItems: 'stretch', gap: 0.65, flexWrap: { xs: 'wrap', md: 'nowrap' } }}>
-              <Box sx={{ bgcolor: 'var(--rlc-card-black)', px: 1.25, py: 0.6, borderRadius: 1, border: '1px solid rgba(255,255,255,0.22)', minWidth: 132 }}>
-                <Typography sx={{ color: '#d1d5db', fontSize: 12.5, fontWeight: 700, lineHeight: 1 }}>Balance</Typography>
-                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '1.03rem', lineHeight: 1.2, mt: 0.25 }}>
-                  {(() => { const raw = userData?.user?.balance; const num = Number(raw); return !isNaN(num) ? num.toLocaleString() : (raw ?? '-'); })()}
-                </Typography>
-              </Box>
-              <Box sx={{ bgcolor: 'var(--rlc-card-black)', px: 1.25, py: 0.6, borderRadius: 1, border: '1px solid rgba(255,255,255,0.22)', minWidth: 82, textAlign: 'center' }}>
-                <Typography sx={{ color: '#d1d5db', fontSize: 12.5, fontWeight: 700, lineHeight: 1 }}>Count</Typography>
-                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '1.03rem', lineHeight: 1.2, mt: 0.25 }}>{distributorRecordCount}</Typography>
-              </Box>
-              <Box sx={{ bgcolor: 'var(--rlc-card-black)', px: 1.25, py: 0.6, borderRadius: 1, border: '1px solid rgba(255,255,255,0.22)', minWidth: 82, textAlign: 'center' }}>
-                <Typography sx={{ color: '#d1d5db', fontSize: 12.5, fontWeight: 700, lineHeight: 1 }}>Total</Typography>
-                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '1.03rem', lineHeight: 1.2, mt: 0.25 }}>{(() => { const n = Number(distributorGrandTotal); return !isNaN(n) ? n.toLocaleString() : '-'; })()}</Typography>
-              </Box>
-              <Box sx={{ bgcolor: 'var(--rlc-card-black)', px: 1.25, py: 0.6, borderRadius: 1, border: '1px solid rgba(255,255,255,0.22)', minWidth: 82, textAlign: 'center' }}>
-                <Typography sx={{ color: '#d1d5db', fontSize: 12.5, fontWeight: 700, lineHeight: 1 }}>First</Typography>
-                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '1.03rem', lineHeight: 1.2, mt: 0.25 }}>{(() => { const n = Number(distributorFirstTotal); return !isNaN(n) ? n.toLocaleString() : '-'; })()}</Typography>
-              </Box>
-              <Box sx={{ bgcolor: 'var(--rlc-card-black)', px: 1.25, py: 0.6, borderRadius: 1, border: '1px solid rgba(255,255,255,0.22)', minWidth: 82, textAlign: 'center' }}>
-                <Typography sx={{ color: '#d1d5db', fontSize: 12.5, fontWeight: 700, lineHeight: 1 }}>Second</Typography>
-                <Typography sx={{ color: '#fff', fontWeight: 800, fontSize: '1.03rem', lineHeight: 1.2, mt: 0.25 }}>{(() => { const n = Number(distributorSecondTotal); return !isNaN(n) ? n.toLocaleString() : '-'; })()}</Typography>
-              </Box>
-            </Box>
           </Box>
 
-          <Paper sx={{ p: 1.1, borderRadius: 1.5, border: '1px solid var(--rlc-table-border)', bgcolor: '#fff', display: 'flex', flexDirection: 'column', gap: 0.8 }}>
+          <Paper sx={{ p: 0.9, borderRadius: 1.4, border: '1px solid var(--rlc-table-border)', bgcolor: '#fff', display: 'flex', flexDirection: 'column', gap: 0.55 }}>
             <Button
               onClick={(e) => setSlotMenuAnchorEl(e.currentTarget)}
               sx={{
                 bgcolor: 'var(--rlc-strip-black)',
                 color: 'var(--rlc-strip-text)',
                 borderRadius: 1,
-                px: 1.3,
-                py: 0.9,
+                px: 1.15,
+                py: 0.72,
                 fontWeight: 700,
                 display: 'flex',
                 justifyContent: 'space-between',
-                fontSize: '0.96rem',
+                fontSize: '0.93rem',
                 textTransform: 'none',
                 '&:hover': { bgcolor: '#020617' },
               }}
@@ -3891,7 +3894,7 @@ function Center() {
                 color: 'var(--rlc-strip-text)',
                 borderRadius: 1,
                 px: 1.3,
-                py: 0.85,
+                py: 0.7,
                 textAlign: 'center',
                 fontWeight: 700,
                 position: 'relative',
@@ -3929,7 +3932,7 @@ function Center() {
                 }}
               />
             </Box>
-            <Box sx={{ bgcolor: 'var(--rlc-strip-black)', color: 'var(--rlc-strip-text)', borderRadius: 1, px: 1.3, py: 0.85, textAlign: 'center', fontWeight: 700 }}>
+            <Box sx={{ bgcolor: 'var(--rlc-strip-black)', color: 'var(--rlc-strip-text)', borderRadius: 1, px: 1.15, py: 0.7, textAlign: 'center', fontWeight: 700 }}>
               Closing In: {formatRemaining(drawRemainingMs)}
             </Box>
           </Paper>
@@ -3938,7 +3941,7 @@ function Center() {
             <Box sx={{ bgcolor: 'var(--rlc-card-green)', color: '#fef08a', textAlign: 'center', fontWeight: 800, letterSpacing: 1.2, py: 0.6, fontSize: '1.85rem', lineHeight: 1 }}>
               NOTIFICATION
             </Box>
-            <Box sx={{ bgcolor: '#050505', minHeight: 178, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 1.25 }}>
+            <Box sx={{ bgcolor: '#050505', minHeight: 138, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 0.75 }}>
               <Typography sx={{ color: '#fde047', textAlign: 'center', fontWeight: 700, lineHeight: 1.55 }}>
                 {winningNumbers?.length ? winningNumbers.map((w) => w.number).join('   ') : 'No winning numbers'}
               </Typography>
@@ -3948,16 +3951,16 @@ function Center() {
       </Box>
 
       {/* Three-column work area */}
-      <Box sx={{ width: '100%', maxWidth: 1320, mx: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.7fr) minmax(0, 0.9fr)', lg: 'minmax(0, 2.05fr) minmax(280px, 0.82fr) minmax(260px, 0.68fr)' }, gap: 1.75, alignItems: 'start', mt: 1.5, px: { xs: 1.25, sm: 2 } }}>
+      <Box sx={{ width: '100%', maxWidth: 1320, mx: 0, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.7fr) minmax(0, 0.9fr)', lg: 'minmax(0, 2.05fr) minmax(280px, 0.82fr) minmax(260px, 0.68fr)' }, gap: 0.9, alignItems: 'start', mt: 0.03, px: { xs: 1.25, sm: 2 } }}>
         <Box sx={{ minWidth: 0 }}>
           <Paper
             elevation={3}
             sx={{
               bgcolor: 'var(--rlc-table-bg)',
               color: 'var(--rlc-table-text)',
-              minHeight: { xs: '54vh', md: '56vh' },
-              height: { xs: 'auto', lg: 'calc(100vh - 205px)' },
-              maxHeight: { lg: 'calc(100vh - 175px)' },
+              minHeight: { xs: '55vh', md: '57vh' },
+              height: { xs: 'auto', lg: 'calc(100vh - 226px)' },
+              maxHeight: { lg: 'calc(100vh - 206px)' },
               p: { xs: 1.35, md: 1.5 },
               borderRadius: 2,
               display: 'flex',
@@ -3968,7 +3971,7 @@ function Center() {
           >
 
             {/* Table Header */}
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.75, flexShrink: 0, overflowX: 'auto', overflowY: 'hidden' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.55, flexShrink: 0, overflowX: 'auto', overflowY: 'hidden' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'nowrap', minWidth: 0 }}>
                 <Button variant="contained" onClick={openDeleteSelectedConfirm} disabled={isDistributorSearchView || isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 126, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-danger)', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Delete Selected</Button>
                 <Button variant="contained" onClick={handleCopySelected} disabled={isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 78, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-secondary)', '&:hover': { bgcolor: 'var(--rlc-secondary-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Copy</Button>
@@ -4073,7 +4076,7 @@ function Center() {
                     pb: 0,
                   }}
                 >
-                  <Table stickyHeader size="small" sx={{ tableLayout: 'fixed', width: '100%', minWidth: isDistributorSearchView ? 620 : 540, '& .MuiTableRow-root': { height: { xs: 48, lg: 46 } } }}>
+                  <Table stickyHeader size="small" sx={{ tableLayout: 'fixed', width: '100%', minWidth: isDistributorSearchView ? 620 : 540, '& .MuiTableRow-root': { height: { xs: 46, lg: 44 } } }}>
                     <colgroup>
                       <col style={{ width: '48px' }} />
                       <col style={{ width: isDistributorSearchView ? '31%' : '42%' }} />
@@ -4157,7 +4160,7 @@ function Center() {
                 <Typography variant="body2" sx={{ color: '#4b5563' }}>Distributors cannot add entries from this panel.</Typography>
               </Paper>
             ) : (
-              <Box component="form" onSubmit={(e) => { e.preventDefault(); handleSingleEntrySubmit(); }} sx={{ mt: 0.5, pt: 0.5, overflowX: 'hidden', bgcolor: '#e5e7eb', p: 1.1, borderTop: '1px solid var(--rlc-table-border)', position: 'sticky', bottom: 0, zIndex: 6, flexShrink: 0, boxShadow: '0 -8px 18px rgba(0,0,0,0.12)' }}>
+              <Box component="form" onSubmit={(e) => { e.preventDefault(); handleSingleEntrySubmit(); }} sx={{ mt: 0.35, pt: 0.35, overflowX: 'hidden', bgcolor: '#e5e7eb', p: 0.95, borderTop: '1px solid var(--rlc-table-border)', position: 'sticky', bottom: 0, zIndex: 6, flexShrink: 0, boxShadow: '0 -8px 18px rgba(0,0,0,0.12)' }}>
                 {isEntryLocked && (
                   <Typography variant="caption" sx={{ display: 'block', color: '#b91c1c', fontWeight: 700, mb: 0.75 }}>
                     Selected draw is closed. Entry controls are disabled.
@@ -4212,9 +4215,9 @@ function Center() {
                           borderRadius: 1,
                           minHeight: 42,
                           height: 42,
-                          '& fieldset': { borderColor: 'var(--rlc-table-border)' },
-                          '&:hover fieldset': { borderColor: '#9ca3af' },
-                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)' },
+                          '& fieldset': { borderColor: '#b6bec8', borderWidth: 1.2 },
+                          '&:hover fieldset': { borderColor: '#7c8798', borderWidth: 1.2 },
+                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)', borderWidth: 1.5 },
                         },
                         '& .MuiInputBase-input': { fontSize: '1rem', fontWeight: 600, lineHeight: 1.3, color: '#111827' },
                         '& .MuiInputLabel-root': { color: '#6b7280', fontSize: '0.95rem', fontWeight: 500 },
@@ -4243,9 +4246,9 @@ function Center() {
                           borderRadius: 2,
                           minHeight: 42,
                           height: 42,
-                          '& fieldset': { borderColor: 'var(--rlc-table-border)' },
-                          '&:hover fieldset': { borderColor: '#9ca3af' },
-                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)' },
+                          '& fieldset': { borderColor: '#b6bec8', borderWidth: 1.2 },
+                          '&:hover fieldset': { borderColor: '#7c8798', borderWidth: 1.2 },
+                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)', borderWidth: 1.5 },
                         },
                         '& .MuiInputBase-input': { fontSize: '1rem', fontWeight: 600, lineHeight: 1.3, color: '#111827' },
                         '& .MuiInputLabel-root': { color: '#6b7280', fontSize: '0.95rem', fontWeight: 500 },
@@ -4274,9 +4277,9 @@ function Center() {
                           borderRadius: 1,
                           minHeight: 42,
                           height: 42,
-                          '& fieldset': { borderColor: 'var(--rlc-table-border)' },
-                          '&:hover fieldset': { borderColor: '#9ca3af' },
-                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)' },
+                          '& fieldset': { borderColor: '#b6bec8', borderWidth: 1.2 },
+                          '&:hover fieldset': { borderColor: '#7c8798', borderWidth: 1.2 },
+                          '&.Mui-focused fieldset': { borderColor: 'var(--rlc-primary)', borderWidth: 1.5 },
                         },
                         '& .MuiInputBase-input': { fontSize: '1rem', fontWeight: 600, lineHeight: 1.3, color: '#111827' },
                         '& .MuiInputLabel-root': { color: '#6b7280', fontSize: '0.95rem', fontWeight: 500 },
@@ -4347,9 +4350,9 @@ function Center() {
           </Box>
         </Paper>
 
-        <Paper sx={{ borderRadius: 1.5, border: '1px solid var(--rlc-panel-navy-border)', overflow: 'hidden', bgcolor: 'var(--rlc-panel-navy)', gridColumn: { xs: 'auto', md: '1 / -1', lg: 'auto' } }}>
+        <Paper sx={{ borderRadius: 1.5, border: '1px solid var(--rlc-panel-navy-border)', overflow: 'hidden', bgcolor: 'var(--rlc-panel-navy)', gridColumn: { xs: 'auto', md: '1 / -1', lg: 'auto' }, display: 'flex', flexDirection: 'column', maxHeight: { lg: 'calc(100vh - 232px)' } }}>
           <Box sx={{ bgcolor: 'var(--rlc-card-green-dark)', color: '#ffffff', px: 1.1, py: 0.65, fontWeight: 800 }}>SCHEMES</Box>
-          <Box sx={{ p: 1.1, display: 'flex', flexDirection: 'column', gap: 0.8 }}>
+          <Box sx={{ p: 1.1, display: 'flex', flexDirection: 'column', gap: 0.8, overflowY: 'auto', minHeight: 0 }}>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKR}><FaStar /> <FaStar /> <span>Palti AKR</span></button>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiTandula}><FaStar /> <FaStar /> <FaStar />  <span>Palti Tandula</span></button>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleChakriRing}><FaStar /> <FaStar /> <FaStar /> <span>24 tandola</span></button>
@@ -4364,7 +4367,7 @@ function Center() {
 
       {/* Bottom Section */}
         {userData && (
-        <div className="mt-6">
+        <div className="mt-0">
 
 
       
