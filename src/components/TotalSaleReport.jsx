@@ -206,14 +206,44 @@ const TotalSaleReport = () => {
       // enforce server-side closed check for combined voucher generation
       params.requireClosed = true;
 
-      // Call the backend combined endpoint which returns Data docs populated with user info
-      const res = await axios.get('/api/v1/data/get-combined-voucher-data', {
-        params,
-      });
-      return res.data.data || [];
+      // Primary endpoint (new backend).
+      try {
+        const res = await axios.get('/api/v1/data/get-combined-voucher-data', { params });
+        return res.data.data || [];
+      } catch (primaryErr) {
+        const status = primaryErr?.response?.status;
+
+        // Backward compatibility for older deployed backends that don't expose
+        // /get-combined-voucher-data yet.
+        if (status === 404) {
+          const fallbackEndpoints = [];
+
+          // Legacy client endpoint expects user context for regular users.
+          if (role === 'user' && currentUserId) {
+            fallbackEndpoints.push('/api/v1/data/get-client-data');
+          }
+
+          // Generic legacy endpoint (returns current auth user's records).
+          fallbackEndpoints.push('/api/v1/data/get-data');
+
+          for (const endpoint of fallbackEndpoints) {
+            try {
+              const fallbackRes = await axios.get(endpoint, { params });
+              return fallbackRes.data?.data || [];
+            } catch (fallbackErr) {
+              if (fallbackErr?.response?.status !== 404) {
+                throw fallbackErr;
+              }
+            }
+          }
+        }
+
+        throw primaryErr;
+      }
     } catch (err) {
       console.error('Failed to fetch combined voucher data', err);
-      toast.error('Failed to fetch combined voucher data');
+      const serverMsg = err?.response?.data?.error || err?.response?.data?.message;
+      toast.error(serverMsg || 'Failed to fetch combined voucher data');
       return [];
     }
   };
