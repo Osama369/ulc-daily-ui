@@ -2850,11 +2850,15 @@ function Center({ onSummaryChange }) {
       doc.text(`Prize Amount: ${formatLedgerCurrency(totalWinningAmount)}`, 14, y);
       y += 5;
 
-      // Split rows into three parts
-      const thirdPoint = Math.ceil(rows.length / 3);
-      const leftRows = rows.slice(0, thirdPoint);
-      const middleRows = rows.slice(thirdPoint, thirdPoint * 2);
-      const rightRows = rows.slice(thirdPoint * 2);
+      // Keep ledger row order aligned with voucher by using round-robin split.
+      const leftRows = [];
+      const middleRows = [];
+      const rightRows = [];
+      rows.forEach((r, idx) => {
+        if (idx % 3 === 0) leftRows.push(r);
+        else if (idx % 3 === 1) middleRows.push(r);
+        else rightRows.push(r);
+      });
 
       // Table positions
       const leftX = 14;
