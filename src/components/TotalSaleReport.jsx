@@ -499,7 +499,7 @@ const TotalSaleReport = () => {
           const w = window.open(blobUrl);
           if (!w) toast.error('Popup blocked. Allow popups to use Print.');
         } catch (err) {
-          console.error('Print error', err);
+          // console.error('Print error', err);
           toast.error('Unable to print.');
         }
       } else {
