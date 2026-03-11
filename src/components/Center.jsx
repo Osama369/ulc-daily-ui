@@ -116,6 +116,11 @@ function Center({ onSummaryChange }) {
     return `${hour12}${suffix}`;
   };
 
+  const getSecondPrizeDivisorForSlot = (slot) => {
+    const slotLabel = String(formatTimeSlotLabel(slot) || '').trim().toUpperCase();
+    return (slotLabel === '4PM' || slotLabel === '10PM') ? 5 : 3;
+  };
+
   const toLocalISODate = (value) => {
     if (!value) return "";
     const d = new Date(value);
@@ -2796,7 +2801,7 @@ function Center({ onSummaryChange }) {
       // Calculate winning amounts for this section
       let firstWinningAmount = 0;
       let secondWinningAmount = 0;
-      const secondPrizeDivisor = drawForPrint?.category === 'GTL' ? 5 : 3;
+      const secondPrizeDivisor = getSecondPrizeDivisorForSlot(drawForPrint);
 
       rows.forEach(([num, f, s]) => {
           const hasAnyWin = winningNumbersForLedger.some(
@@ -3446,7 +3451,6 @@ function Center({ onSummaryChange }) {
       targetDraws = [drawForPrint];
     }
 
-    const secondPrizeDivisor = 3;
     const result = {
       drawRows: [],
       totals: { first: 0, second: 0, sale: 0, prize: 0, commission: 0, safi: 0, hissa: 0, subTotal: 0, bill: 0 },
@@ -3459,6 +3463,7 @@ function Center({ onSummaryChange }) {
     let hasAnyDrawData = false;
 
     for (const draw of targetDraws) {
+      const secondPrizeDivisor = getSecondPrizeDivisorForSlot(draw);
       const fetchedEntries = await fetchVoucherData(drawDate, draw?._id);
       const allRows = [];
       (fetchedEntries || []).forEach((entry) => {

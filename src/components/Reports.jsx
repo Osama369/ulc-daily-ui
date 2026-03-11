@@ -53,6 +53,11 @@ const Reports = () => {
     return `${hour12}${suffix}`;
   };
 
+  const getSecondPrizeDivisorForSlot = (slot) => {
+    const slotLabel = String(formatTimeSlotLabel(slot) || '').trim().toUpperCase();
+    return (slotLabel === '4PM' || slotLabel === '10PM') ? 5 : 3;
+  };
+
   const getSlotHourMinute = (slot) => {
     if (!slot) return null;
     if (typeof slot.hour === 'number' && !Number.isNaN(slot.hour)) {
@@ -343,7 +348,6 @@ const Reports = () => {
       },
     };
 
-    const secondPrizeDivisor = 3;
     const sourceUserIds = isDistributorSelfBill
       ? clients.map((c) => c?._id).filter(Boolean)
       : [role === 'user' ? currentUserId : selectedClient].filter(Boolean);
@@ -353,6 +357,7 @@ const Reports = () => {
     let hasAnyDrawData = false;
 
     for (const draw of targetDraws) {
+      const secondPrizeDivisor = getSecondPrizeDivisorForSlot(draw);
       const winningNumbersForDraw = await fetchWinningNumbersForDraw(dateParam, draw);
       let firstSale = 0;
       let secondSale = 0;
@@ -1301,7 +1306,7 @@ const Reports = () => {
         // Calculate winning amounts for this section
         let firstWinningAmount = 0;
         let secondWinningAmount = 0;
-        const secondPrizeDivisor = 3;
+        const secondPrizeDivisor = getSecondPrizeDivisorForSlot(selectedDraw);
   
         rows.forEach(([num, f, s]) => {
           const entryColor = getEntryColor(num);
