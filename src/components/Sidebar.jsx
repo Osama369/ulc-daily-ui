@@ -190,6 +190,13 @@ const Sidebar = ({ onSelect, variant = 'permanent', open = true, onClose = null 
                   <ListItemText primary="TimeSlots" />
                 </ListItemButton>
               </ListItem>
+
+              <ListItem disablePadding>
+                <ListItemButton component={Link} to="/admin/distributor-no-search" onClick={closeIfOverlay}>
+                  <ListItemIcon sx={{ color: 'var(--rlc-sidebar-icon)', minWidth: 34 }}><ReportIcon /></ListItemIcon>
+                  <ListItemText primary="NO Search Report" />
+                </ListItemButton>
+              </ListItem>
             </>
           )}
 

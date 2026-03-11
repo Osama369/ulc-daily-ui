@@ -23,6 +23,7 @@ import { Toaster } from 'react-hot-toast';
 import RoleProtectedRoute from './components/RoleProtectedRoute';
 import WinningNumbers from './pages/admin/WinningNumbers';
 import DrawList from './pages/admin/DrawList';
+import DistributorNoSearch from './pages/admin/DistributorNoSearch';
 import { clearUser, setUser } from './redux/features/userSlice';
 
 // this is the routing setup 
@@ -158,6 +159,7 @@ function App() {
           <Route path="winning-numbers" element={<WinningNumbers/>} />
           <Route path="draws" element={<DrawList/>} />
           <Route path="timeslots" element={<DrawList/>} />
+          <Route path="distributor-no-search" element={<DistributorNoSearch/>} />
         </Route>
       </Routes>
 
