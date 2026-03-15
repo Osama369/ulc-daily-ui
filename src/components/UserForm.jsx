@@ -32,10 +32,16 @@ const UserForm = ({ onSubmit, initialData = {}, isEditing = false, theme }) => {
     doubleFigure: initialData.doubleFigure || 0,
     tripleFigure: initialData.tripleFigure || 0,
     fourFigure: initialData.fourFigure || 0,
+    crossFigureCommission: initialData.crossFigureCommission || 0,
+    crossAkraCommission: initialData.crossAkraCommission || 0,
+    crossTandolaCommission: initialData.crossTandolaCommission || 0,
     hinsaMultiplier: initialData.hinsaMultiplier || 0,
     akraMultiplier: initialData.akraMultiplier || 0,
     tandolaMultiplier: initialData.tandolaMultiplier || 0,
     pangoraMultiplier: initialData.pangoraMultiplier || 0,
+    crossFigureMultiplier: initialData.crossFigureMultiplier || 0,
+    crossAkraMultiplier: initialData.crossAkraMultiplier || 0,
+    crossTandolaMultiplier: initialData.crossTandolaMultiplier || 0,
     commission: initialData.commission || 0,
     password: "",
     confirmPassword: "",
@@ -134,6 +140,17 @@ const UserForm = ({ onSubmit, initialData = {}, isEditing = false, theme }) => {
         </Grid>
 
         <Grid item xs={12} md={6}>
+          <TextField fullWidth type="number" name="crossFigureCommission" label="Cross Figure Commission" value={formData.crossFigureCommission} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <TextField fullWidth type="number" name="crossAkraCommission" label="Cross AKRA Commission" value={formData.crossAkraCommission} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField fullWidth type="number" name="crossTandolaCommission" label="Cross Tandola Commission" value={formData.crossTandolaCommission} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
           <TextField fullWidth required type="number" name="hinsaMultiplier" label="Figure Prize" value={formData.hinsaMultiplier} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
         </Grid>
         <Grid item xs={12} md={6}>
@@ -145,6 +162,17 @@ const UserForm = ({ onSubmit, initialData = {}, isEditing = false, theme }) => {
         </Grid>
         <Grid item xs={12} md={6}>
           <TextField fullWidth required type="number" name="pangoraMultiplier" label="Pangora Prize" value={formData.pangoraMultiplier} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField fullWidth required type="number" name="crossFigureMultiplier" label="Cross Figure Prize" value={formData.crossFigureMultiplier} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <TextField fullWidth required type="number" name="crossAkraMultiplier" label="Cross AKRA Prize" value={formData.crossAkraMultiplier} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
+        </Grid>
+
+        <Grid item xs={12} md={6}>
+          <TextField fullWidth required type="number" name="crossTandolaMultiplier" label="Cross Tandola Prize" value={formData.crossTandolaMultiplier} onChange={handleChange} InputProps={{ startAdornment: (<InputAdornment position="start"><CalculateIcon /></InputAdornment>) }} />
         </Grid>
 
         <Grid item xs={12} md={6}>

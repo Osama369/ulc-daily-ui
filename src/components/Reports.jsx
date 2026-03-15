@@ -58,6 +58,56 @@ const Reports = () => {
     return (slotLabel === '4PM' || slotLabel === '10PM') ? 5 : 3;
   };
 
+  const isCrossFigurePattern = (value) => /^\+{1,3}\d$/.test(String(value || '').trim());
+  const isCrossAkraPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{2}$/, /^\d\+\d$/, /^\d{2}\+$/, /^\+\+\d{2}$/, /^\d\+\+\d$/, /^\+\d{2}\+$/, /^\+\d\+\d$/].some((re) => re.test(raw));
+  };
+  const isCrossTandolaPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{3}$/, /^\d\+\d{2}$/, /^\d{2}\+\d$/].some((re) => re.test(raw));
+  };
+
+  const getCommissionRateForEntry = (config, category, number) => {
+    if (category === 'HINSA') {
+      return isCrossFigurePattern(number)
+        ? Number(config?.crossFigureCommission || 0)
+        : Number(config?.singleFigure || 0);
+    }
+    if (category === 'AKRA') {
+      return isCrossAkraPattern(number)
+        ? Number(config?.crossAkraCommission || 0)
+        : Number(config?.doubleFigure || 0);
+    }
+    if (category === 'TANDOLA') {
+      return isCrossTandolaPattern(number)
+        ? Number(config?.crossTandolaCommission || 0)
+        : Number(config?.tripleFigure || 0);
+    }
+    if (category === 'PANGORA') return Number(config?.fourFigure || 0);
+    return 0;
+  };
+
+  const getMultiplierForEntry = (config, category, number) => {
+    if (category === 'HINSA') {
+      return isCrossFigurePattern(number)
+        ? Number(config?.crossFigureMultiplier ?? 0) || 0
+        : Number(config?.hinsaMultiplier ?? 0) || 0;
+    }
+    if (category === 'AKRA') {
+      return isCrossAkraPattern(number)
+        ? Number(config?.crossAkraMultiplier ?? 0) || 0
+        : Number(config?.akraMultiplier ?? 0) || 0;
+    }
+    if (category === 'TANDOLA') {
+      return isCrossTandolaPattern(number)
+        ? Number(config?.crossTandolaMultiplier ?? 0) || 0
+        : Number(config?.tandolaMultiplier ?? 0) || 0;
+    }
+    if (category === 'PANGORA') return Number(config?.pangoraMultiplier ?? 0) || 0;
+    return 0;
+  };
+
   const getSlotHourMinute = (slot) => {
     if (!slot) return null;
     if (typeof slot.hour === 'number' && !Number.isNaN(slot.hour)) {
@@ -362,7 +412,7 @@ const Reports = () => {
       let firstSale = 0;
       let secondSale = 0;
       let prize = 0;
-      const categorySaleTotals = { HINSA: 0, AKRA: 0, TANDOLA: 0, PANGORA: 0 };
+      let commission = 0;
 
       if (isDistributorSelfBill) {
         // Distributor own bill: aggregate draw-wise sale/prize across all clients.
@@ -408,14 +458,16 @@ const Reports = () => {
             const catSale = catFirst + catSecond;
             firstSale += catFirst;
             secondSale += catSecond;
-            categorySaleTotals[cat] += catSale;
-
-            const multiplier = Number(clientMultipliers[cat]) || 1;
             rows.forEach(([num, fVal, sVal]) => {
+              const rowF = Number(fVal) || 0;
+              const rowS = Number(sVal) || 0;
+              const commissionRate = getCommissionRateForEntry(cfg, cat, num);
+              const multiplier = getMultiplierForEntry(cfg, cat, num);
+              commission += (rowF + rowS) * commissionRate / 100;
               for (const winning of winningNumbersForDraw) {
                 if (num === winning.number || checkPositionalMatch(num, winning.number)) {
-                  if (winning.type === 'first') prize += (Number(fVal) || 0) * multiplier;
-                  else if (winning.type === 'second' || winning.type === 'third') prize += ((Number(sVal) || 0) * multiplier) / secondPrizeDivisor;
+                  if (winning.type === 'first') prize += rowF * multiplier;
+                  else if (winning.type === 'second' || winning.type === 'third') prize += (rowS * multiplier) / secondPrizeDivisor;
                 }
               }
             });
@@ -451,14 +503,16 @@ const Reports = () => {
           const catSale = catFirst + catSecond;
           firstSale += catFirst;
           secondSale += catSecond;
-          categorySaleTotals[cat] += catSale;
-
-          const multiplier = Number(multipliers[cat]) || 1;
           rows.forEach(([num, f, s]) => {
+            const rowF = Number(f) || 0;
+            const rowS = Number(s) || 0;
+            const commissionRate = getCommissionRateForEntry(baseConfig, cat, num);
+            const multiplier = getMultiplierForEntry(baseConfig, cat, num);
+            commission += (rowF + rowS) * commissionRate / 100;
             for (const winning of winningNumbersForDraw) {
               if (num === winning.number || checkPositionalMatch(num, winning.number)) {
-                if (winning.type === 'first') prize += (Number(f) || 0) * multiplier;
-                else if (winning.type === 'second' || winning.type === 'third') prize += ((Number(s) || 0) * multiplier) / secondPrizeDivisor;
+                if (winning.type === 'first') prize += rowF * multiplier;
+                else if (winning.type === 'second' || winning.type === 'third') prize += (rowS * multiplier) / secondPrizeDivisor;
               }
             }
           });
@@ -470,10 +524,6 @@ const Reports = () => {
         continue;
       }
       hasAnyDrawData = true;
-      const commission = Object.entries(categorySaleTotals).reduce(
-        (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
-        0
-      );
       const safi = sale - commission;
       const subTotal = safi - prize;
       const hissa = Math.abs(subTotal) * hissaShare;
@@ -932,15 +982,15 @@ const Reports = () => {
         const sectionTotalCents = sectionTotals.firstTotalCents + sectionTotals.secondTotalCents;
         const sectionTotal = fromCents(sectionTotalCents);
 
-        // determine commission rate per section from resolved `baseUserConfig`
-        let commissionRate = 0;
-        if (title === 'HINSA') commissionRate = baseUserConfig?.singleFigure || 0;
-        else if (title === 'AKRA') commissionRate = baseUserConfig?.doubleFigure || 0;
-        else if (title === 'TANDOLA') commissionRate = baseUserConfig?.tripleFigure || 0;
-        else if (title === 'PANGORA') commissionRate = baseUserConfig?.fourFigure || 0;
-
         // compute commission/net in cents to avoid FP issues
-        const commissionAmountCents = Math.round(sectionTotalCents * (Number(commissionRate) || 0) / 100);
+        let commissionAmountCents = 0;
+        rows.forEach(([num, first, second]) => {
+          const firstCents = Math.round((Number(first) || 0) * 100);
+          const secondCents = Math.round((Number(second) || 0) * 100);
+          const rowSaleCents = firstCents + secondCents;
+          const commissionRate = getCommissionRateForEntry(baseUserConfig, title, num);
+          commissionAmountCents += Math.round(rowSaleCents * commissionRate / 100);
+        });
         const netAfterCommissionCents = sectionTotalCents - commissionAmountCents;
 
         // accumulate into grand totals (cents)
@@ -952,7 +1002,7 @@ const Reports = () => {
         doc.text(`First: ${formatCurrency(fromCents(sectionTotals.firstTotalCents))}`, 14, y);
         doc.text(`Second: ${formatCurrency(fromCents(sectionTotals.secondTotalCents))}`, 60, y);
         doc.text(`Total: ${formatCurrency(sectionTotal)}`, 106, y);
-        doc.text(`Commission (${commissionRate}%): ${formatCurrency(fromCents(commissionAmountCents))}`, 140, y);
+        doc.text(`Commission: ${formatCurrency(fromCents(commissionAmountCents))}`, 140, y);
         y += 5;
         doc.text(`Net: ${formatCurrency(fromCents(netAfterCommissionCents))}`, 14, y);
         y += 2;
@@ -1275,8 +1325,7 @@ const Reports = () => {
         const totals = calculateTotals(rows);
         const net = totals.first + totals.second;
 
-        let commissionRate = 0;
-        let multiplier = 0;
+        let defaultMultiplier = 0;
 
         // For reports: use the selected client's configuration when
         // distributor is generating a client ledger; otherwise fall
@@ -1287,17 +1336,13 @@ const Reports = () => {
         const baseUserConfig = role === 'user' ? userData?.user : (selectedClientConfig || userData?.user || {});
 
         if (title === "HINSA") {
-          commissionRate = baseUserConfig.singleFigure;
-          multiplier = Number(baseUserConfig.hinsaMultiplier ?? 0) || 0;
+          defaultMultiplier = Number(baseUserConfig.hinsaMultiplier ?? 0) || 0;
         } else if (title === "AKRA") {
-          commissionRate = baseUserConfig.doubleFigure;
-          multiplier = Number(baseUserConfig.akraMultiplier ?? 0) || 0;
+          defaultMultiplier = Number(baseUserConfig.akraMultiplier ?? 0) || 0;
         } else if (title === "TANDOLA") {
-          commissionRate = baseUserConfig.tripleFigure;
-          multiplier = Number(baseUserConfig.tandolaMultiplier ?? 0) || 0;
+          defaultMultiplier = Number(baseUserConfig.tandolaMultiplier ?? 0) || 0;
         } else if (title === "PANGORA") {
-          commissionRate = baseUserConfig.fourFigure;
-          multiplier = Number(baseUserConfig.pangoraMultiplier ?? 0) || 0;
+          defaultMultiplier = Number(baseUserConfig.pangoraMultiplier ?? 0) || 0;
         }
   
         // const commissionAmount = net * commissionRate;
@@ -1310,6 +1355,7 @@ const Reports = () => {
   
         rows.forEach(([num, f, s]) => {
           const entryColor = getEntryColor(num);
+          const multiplier = getMultiplierForEntry(baseUserConfig, title, num) || defaultMultiplier;
   
           // Check if this entry is highlighted (has winning color)
           if (entryColor[0] !== 0 || entryColor[1] !== 0 || entryColor[2] !== 0) {
@@ -1332,7 +1378,11 @@ const Reports = () => {
         const totalWinningAmount = firstWinningAmount + secondWinningAmount;
 
         // compute commission for this section
-        const commissionAmount = (net * (Number(commissionRate) || 0)) / 100;
+        const commissionAmount = rows.reduce((sum, [num, f, s]) => {
+          const sale = (Number(f) || 0) + (Number(s) || 0);
+          const rate = getCommissionRateForEntry(baseUserConfig, title, num);
+          return sum + (sale * rate) / 100;
+        }, 0);
         const netPayable = net - commissionAmount;
 
         grandTotals.first += totals.first;

@@ -73,8 +73,14 @@ function Center({ onSummaryChange }) {
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const distributorRecordCount = entries.length;
-  const distributorFirstTotal = entries.reduce((sum, e) => sum + (Number(e.f) || 0), 0);
-  const distributorSecondTotal = entries.reduce((sum, e) => sum + (Number(e.s) || 0), 0);
+  const distributorFirstTotal = useMemo(
+    () => entries.reduce((sum, e) => sum + (Number(e.f) || 0), 0),
+    [entries]
+  );
+  const distributorSecondTotal = useMemo(
+    () => entries.reduce((sum, e) => sum + (Number(e.s) || 0), 0),
+    [entries]
+  );
   const distributorGrandTotal = distributorFirstTotal + distributorSecondTotal;
 
   useEffect(() => {
@@ -119,6 +125,56 @@ function Center({ onSummaryChange }) {
   const getSecondPrizeDivisorForSlot = (slot) => {
     const slotLabel = String(formatTimeSlotLabel(slot) || '').trim().toUpperCase();
     return (slotLabel === '4PM' || slotLabel === '10PM') ? 5 : 3;
+  };
+
+  const isCrossFigurePattern = (value) => /^\+{1,3}\d$/.test(String(value || '').trim());
+  const isCrossAkraPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{2}$/, /^\d\+\d$/, /^\d{2}\+$/, /^\+\+\d{2}$/, /^\d\+\+\d$/, /^\+\d{2}\+$/, /^\+\d\+\d$/].some((re) => re.test(raw));
+  };
+  const isCrossTandolaPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{3}$/, /^\d\+\d{2}$/, /^\d{2}\+\d$/].some((re) => re.test(raw));
+  };
+
+  const getCommissionRateForEntry = (config, category, number) => {
+    if (category === 'HINSA') {
+      return isCrossFigurePattern(number)
+        ? Number(config?.crossFigureCommission || 0)
+        : Number(config?.singleFigure || 0);
+    }
+    if (category === 'AKRA') {
+      return isCrossAkraPattern(number)
+        ? Number(config?.crossAkraCommission || 0)
+        : Number(config?.doubleFigure || 0);
+    }
+    if (category === 'TANDOLA') {
+      return isCrossTandolaPattern(number)
+        ? Number(config?.crossTandolaCommission || 0)
+        : Number(config?.tripleFigure || 0);
+    }
+    if (category === 'PANGORA') return Number(config?.fourFigure || 0);
+    return 0;
+  };
+
+  const getMultiplierForEntry = (config, category, number) => {
+    if (category === 'HINSA') {
+      return isCrossFigurePattern(number)
+        ? Number(config?.crossFigureMultiplier ?? 0) || 0
+        : Number(config?.hinsaMultiplier ?? 0) || 0;
+    }
+    if (category === 'AKRA') {
+      return isCrossAkraPattern(number)
+        ? Number(config?.crossAkraMultiplier ?? 0) || 0
+        : Number(config?.akraMultiplier ?? 0) || 0;
+    }
+    if (category === 'TANDOLA') {
+      return isCrossTandolaPattern(number)
+        ? Number(config?.crossTandolaMultiplier ?? 0) || 0
+        : Number(config?.tandolaMultiplier ?? 0) || 0;
+    }
+    if (category === 'PANGORA') return Number(config?.pangoraMultiplier ?? 0) || 0;
+    return 0;
   };
 
   const toLocalISODate = (value) => {
@@ -551,7 +607,39 @@ function Center({ onSummaryChange }) {
   const searchNeedle = String(searchNumber || "").trim();
   const isSearchActive = searchNeedle.length > 0;
   const isDistributorSearchView = role === "distributor" && isSearchActive;
+  const localSearchSource = role === "distributor" ? null : entries;
   const tableEntries = isSearchActive ? (searchResults || []) : entries;
+  const selectedEntryIdSet = useMemo(() => new Set(selectedEntries), [selectedEntries]);
+
+  const groupedEntries = useMemo(() => {
+    return tableEntries.reduce((acc, entry) => {
+      if (!acc[entry.parentId]) {
+        acc[entry.parentId] = [];
+      }
+      acc[entry.parentId].push(entry);
+      return acc;
+    }, {});
+  }, [tableEntries]);
+
+  const flatRows = useMemo(() => {
+    return Object.entries(groupedEntries).flatMap(([parentId, group]) =>
+      group.map((entry, idx) => ({ ...entry, parentId, isGroupStart: idx === 0 }))
+    );
+  }, [groupedEntries]);
+
+  const allEntryIds = useMemo(
+    () => flatRows.map((entry) => entry.objectId || entry.id),
+    [flatRows]
+  );
+
+  const allEntriesSelected = useMemo(
+    () => allEntryIds.length > 0 && allEntryIds.every((id) => selectedEntryIdSet.has(id)),
+    [allEntryIds, selectedEntryIdSet]
+  );
+
+  const noDataMessage = isSearchActive
+    ? (searchLoading ? 'Searching entries...' : 'No matching NO entries found.')
+    : 'No records found for the selected time slot / date.';
 
   // Keep the latest appended entry visible.
   useEffect(() => {
@@ -566,14 +654,6 @@ function Center({ onSummaryChange }) {
     });
     return () => window.cancelAnimationFrame(rafId);
   }, [entries.length, isSearchActive]);
-
-  const groupedEntries = tableEntries.reduce((acc, entry) => {
-    if (!acc[entry.parentId]) {
-      acc[entry.parentId] = [];
-    }
-    acc[entry.parentId].push(entry);
-    return acc;
-  }, {});
 
   // Search NO in visible table context.
   // - user: local filter in own entries
@@ -617,7 +697,7 @@ function Center({ onSummaryChange }) {
         }
       } else {
         const needle = String(q || '').trim();
-        const localRows = (entries || []).filter((entry) =>
+        const localRows = (localSearchSource || []).filter((entry) =>
           String(entry.no || "").trim() === needle
         );
         setSearchResults(localRows);
@@ -625,7 +705,7 @@ function Center({ onSummaryChange }) {
     }, 250);
 
     return () => window.clearTimeout(timerId);
-  }, [searchNumber, role, selectedDraw?._id, drawDate, entries]);
+  }, [searchNumber, role, selectedDraw?._id, drawDate, localSearchSource]);
 
   // When selectedDraw or drawDate changes, fetch corresponding voucher data
   useEffect(() => {
@@ -638,6 +718,27 @@ function Center({ onSummaryChange }) {
       setEntries([]);
     }
   }, [selectedDraw, drawDate]);
+
+  // Keep notification/panel winners synced to selected date + timeslot.
+  useEffect(() => {
+    if (selectedDraw && selectedDraw._id && drawDate) {
+      getWinningNumbers(drawDate, selectedDraw._id, true).catch(() => {
+        setWinningNumbers([]);
+      });
+    } else {
+      setWinningNumbers([]);
+    }
+  }, [selectedDraw?._id, drawDate]);
+
+  const firstWinningNumbers = (winningNumbers || [])
+    .filter((w) => w?.type === 'first')
+    .map((w) => String(w?.number || '').trim())
+    .filter(Boolean);
+
+  const secondWinningNumbers = (winningNumbers || [])
+    .filter((w) => w?.type === 'second')
+    .map((w) => String(w?.number || '').trim())
+    .filter(Boolean);
 
   // Delete confirmation modal state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -696,17 +797,16 @@ function Center({ onSummaryChange }) {
   const [selectAll, setSelectAll] = useState(false);
   const [copiedEntries, setCopiedEntries] = useState([]);
 
-  const toggleSelectEntry = (id) => {
+  const toggleSelectEntry = useCallback((id) => {
     setSelectedEntries(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  }, []);
 
   const toggleSelectAll = () => {
-    if (selectAll) {
+    if (allEntriesSelected) {
       setSelectedEntries([]);
       setSelectAll(false);
     } else {
-      const allIds = Object.values(groupedEntries).flat().map(entry => entry.objectId || entry.id);
-      setSelectedEntries(allIds);
+      setSelectedEntries(allEntryIds);
       setSelectAll(true);
     }
   };
@@ -716,7 +816,7 @@ function Center({ onSummaryChange }) {
       toast("No entries selected to copy");
       return;
     }
-    const selected = Object.values(groupedEntries).flat().filter(e => selectedEntries.includes(e.objectId || e.id))
+    const selected = flatRows.filter((e) => selectedEntryIdSet.has(e.objectId || e.id))
       .map(e => ({ no: e.no, f: e.f, s: e.s }));
     setCopiedEntries(selected);
     toast.success(`${selected.length} entries copied`);
@@ -2776,26 +2876,25 @@ function Center({ onSummaryChange }) {
       const net = totals.first + totals.second;
 
       
-      let commissionRate = 0;
-      let multiplier = 0;
+      let defaultMultiplier = 0;
 
       const userConfig = userData?.user || {};
 
       if (title === "HINSA") {
-        commissionRate = userConfig.singleFigure;
-        multiplier = Number(userConfig.hinsaMultiplier ?? 0) || 0;
+        defaultMultiplier = Number(userConfig.hinsaMultiplier ?? 0) || 0;
       } else if (title === "AKRA") {
-        commissionRate = userConfig.doubleFigure;
-        multiplier = Number(userConfig.akraMultiplier ?? 0) || 0;
+        defaultMultiplier = Number(userConfig.akraMultiplier ?? 0) || 0;
       } else if (title === "TANDOLA") {
-        commissionRate = userConfig.tripleFigure;
-        multiplier = Number(userConfig.tandolaMultiplier ?? 0) || 0;
+        defaultMultiplier = Number(userConfig.tandolaMultiplier ?? 0) || 0;
       } else if (title === "PANGORA") {
-        commissionRate = userConfig.fourFigure;
-        multiplier = Number(userConfig.pangoraMultiplier ?? 0) || 0;
+        defaultMultiplier = Number(userConfig.pangoraMultiplier ?? 0) || 0;
       }
 
-      const commissionAmount = (net * (Number(commissionRate) || 0)) / 100;
+      const commissionAmount = rows.reduce((sum, [num, f, s]) => {
+        const rowSale = (Number(f) || 0) + (Number(s) || 0);
+        const rate = getCommissionRateForEntry(userConfig, title, num);
+        return sum + (rowSale * rate) / 100;
+      }, 0);
       const netPayable = net - commissionAmount;
 
       // Calculate winning amounts for this section
@@ -2804,6 +2903,7 @@ function Center({ onSummaryChange }) {
       const secondPrizeDivisor = getSecondPrizeDivisorForSlot(drawForPrint);
 
       rows.forEach(([num, f, s]) => {
+          const multiplier = getMultiplierForEntry(userConfig, title, num) || defaultMultiplier;
           const hasAnyWin = winningNumbersForLedger.some(
             (winning) => num === winning.number || checkPositionalMatch(num, winning.number)
           );
@@ -3487,7 +3587,7 @@ function Center({ onSummaryChange }) {
       let firstSale = 0;
       let secondSale = 0;
       let prize = 0;
-      const categorySaleTotals = { HINSA: 0, AKRA: 0, TANDOLA: 0, PANGORA: 0 };
+      let commission = 0;
 
       Object.entries(rowsByCategory).forEach(([cat, rows]) => {
         const catFirst = rows.reduce((acc, [, f]) => acc + (Number(f) || 0), 0);
@@ -3495,14 +3595,16 @@ function Center({ onSummaryChange }) {
         const catSale = catFirst + catSecond;
         firstSale += catFirst;
         secondSale += catSecond;
-        categorySaleTotals[cat] += catSale;
-
-        const multiplier = Number(multipliers[cat]) || 1;
         rows.forEach(([num, f, s]) => {
+          const rowF = Number(f) || 0;
+          const rowS = Number(s) || 0;
+          const rate = getCommissionRateForEntry(selectedUser, cat, num);
+          const multiplier = getMultiplierForEntry(selectedUser, cat, num);
+          commission += (rowF + rowS) * rate / 100;
           for (const winning of winningNumbersForDraw) {
             if (num === winning.number || checkPositionalMatch(num, winning.number)) {
-              if (winning.type === 'first') prize += (Number(f) || 0) * multiplier;
-              else if (winning.type === 'second' || winning.type === 'third') prize += ((Number(s) || 0) * multiplier) / secondPrizeDivisor;
+              if (winning.type === 'first') prize += rowF * multiplier;
+              else if (winning.type === 'second' || winning.type === 'third') prize += (rowS * multiplier) / secondPrizeDivisor;
             }
           }
         });
@@ -3513,10 +3615,6 @@ function Center({ onSummaryChange }) {
         continue;
       }
       hasAnyDrawData = true;
-      const commission = Object.entries(categorySaleTotals).reduce(
-        (sum, [cat, catSale]) => sum + ((Number(catSale) || 0) * (Number(rates[cat]) || 0)) / 100,
-        0
-      );
       const safi = sale - commission;
       const subTotal = safi - prize;
       const hissa = Math.abs(subTotal) * hissaShare;
@@ -4010,14 +4108,7 @@ function Center({ onSummaryChange }) {
             </Box>
 
             {(() => {
-              const flat = Object.entries(groupedEntries).flatMap(([parentId, group]) =>
-                group.map((entry, idx) => ({ ...entry, parentId, isGroupStart: idx === 0 }))
-              );
-              const noDataMessage = isSearchActive
-                ? (searchLoading ? 'Searching entries...' : 'No matching NO entries found.')
-                : 'No records found for the selected time slot / date.';
-
-              if (!flat || flat.length === 0) {
+              if (!flatRows || flatRows.length === 0) {
                 return (
                     <TableContainer
                       ref={tableContainerRef}
@@ -4098,18 +4189,10 @@ function Center({ onSummaryChange }) {
                       <TableRow>
                         <TableCell padding="checkbox" sx={{ bgcolor: 'var(--rlc-table-head)', color: 'var(--rlc-table-text)', fontSize: '0.92rem', fontWeight: 700, position: 'sticky', top: 0, zIndex: 2 }}>
                           <Checkbox
-                            checked={
-                              Object.values(groupedEntries)
-                                .flat()
-                                .length > 0 &&
-                              Object.values(groupedEntries)
-                                .flat()
-                                .every(entry => selectedEntries.includes(entry.objectId || entry.id))
-                            }
+                            checked={allEntriesSelected}
                             onChange={(e) => {
                               if (e.target.checked) {
-                                const allIds = Object.values(groupedEntries).flat().map(entry => entry.objectId || entry.id);
-                                setSelectedEntries(allIds);
+                                setSelectedEntries(allEntryIds);
                               } else {
                                 setSelectedEntries([]);
                               }
@@ -4127,17 +4210,17 @@ function Center({ onSummaryChange }) {
                       </TableRow>
                     </TableHead>
                     <TableBody sx={{ '& .MuiTableRow-root:nth-of-type(odd)': { bgcolor: '#f9fafb' }, '& .MuiTableRow-root:hover': { bgcolor: '#eef2ff' } }}>
-                      {flat.length === 0 ? (
+                      {flatRows.length === 0 ? (
                         <TableRow>
                           <TableCell colSpan={isDistributorSearchView ? 6 : 5} sx={{ textAlign: 'center', py: 6, color: 'var(--rlc-table-muted)' }}>
                             {noDataMessage}
                           </TableCell>
                         </TableRow>
                       ) : (
-                        flat.map((row) => (
+                        flatRows.map((row) => (
                           <TableRow key={row.objectId || row._tempId || row.id} hover sx={{ borderBottom: '1px solid var(--rlc-table-border)' }}>
                             <TableCell padding="checkbox">
-                              <Checkbox checked={selectedEntries.includes(row.objectId || row.id)} onChange={() => toggleSelectEntry(row.objectId || row.id)} sx={{ color: 'var(--rlc-table-muted)', '&.Mui-checked': { color: 'var(--rlc-primary)' } }} />
+                              <Checkbox checked={selectedEntryIdSet.has(row.objectId || row.id)} onChange={() => toggleSelectEntry(row.objectId || row.id)} sx={{ color: 'var(--rlc-table-muted)', '&.Mui-checked': { color: 'var(--rlc-primary)' } }} />
                             </TableCell>
                             <TableCell sx={{ color: 'var(--rlc-table-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.98rem', fontWeight: 600 }}>{row.no}</TableCell>
                             <TableCell align="right" sx={{ color: 'var(--rlc-table-text)', fontSize: '0.98rem', fontWeight: 600 }}>{row.f}</TableCell>
@@ -4334,28 +4417,29 @@ function Center({ onSummaryChange }) {
           </Paper>
         </Box>
 
-        <Paper sx={{ borderRadius: 1.5, border: '1px solid var(--rlc-table-border)', bgcolor: '#fff', p: 1.1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.8 }}>
-            <Button variant="contained" sx={{ bgcolor: 'var(--rlc-success)', '&:hover': { bgcolor: 'var(--rlc-success-hover)' }, textTransform: 'none', fontWeight: 700 }}>Add Sheet</Button>
-            <Button variant="contained" sx={{ bgcolor: 'var(--rlc-success)', '&:hover': { bgcolor: 'var(--rlc-success-hover)' }, textTransform: 'none', fontWeight: 700 }}>View Sheet</Button>
-          </Box>
-          <TextField size="small" label="Name" placeholder="Enter sheet name" />
+        <Paper sx={{ borderRadius: 1.5, border: '1px solid var(--rlc-table-border)', bgcolor: '#fff', p: 1.1, display: 'flex', flexDirection: 'column', gap: 0.8 }}>
           <Typography sx={{ textAlign: 'center', fontWeight: 700, color: '#1f2937' }}>
             Draw: {selectedDraw ? formatTimeSlotLabel(selectedDraw) : '-'}
           </Typography>
-          <Box sx={{ border: '1px solid var(--rlc-table-border)', borderRadius: 1, overflow: 'hidden' }}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 72px 72px 1fr', bgcolor: 'var(--rlc-table-head)', color: '#111827', fontWeight: 700, p: 0.8 }}>
-              <span style={{ textAlign: 'center' }}>Num</span>
-              <span style={{ textAlign: 'center' }}>F</span>
-              <span style={{ textAlign: 'center' }}>S</span>
-              <span style={{ textAlign: 'center' }}>Action</span>
-            </Box>
-            <Box sx={{ p: 2, textAlign: 'center', color: 'var(--rlc-table-muted)', fontStyle: 'italic', bgcolor: '#fff' }}>No Record</Box>
-          </Box>
-          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0.8 }}>
-            <Button variant="contained" sx={{ bgcolor: 'var(--rlc-secondary)', '&:hover': { bgcolor: 'var(--rlc-secondary-hover)' }, textTransform: 'none', fontWeight: 700 }}>Cancel</Button>
-            <Button variant="contained" sx={{ bgcolor: 'var(--rlc-success)', '&:hover': { bgcolor: 'var(--rlc-success-hover)' }, textTransform: 'none', fontWeight: 700 }}>Save</Button>
-            <Button disabled variant="contained" sx={{ bgcolor: 'var(--rlc-disabled)', color: '#fff', textTransform: 'none', fontWeight: 700 }}>Print</Button>
+          <Typography sx={{ textAlign: 'center', fontWeight: 700, color: '#4b5563', fontSize: 13 }}>
+            Date: {drawDate || '-'}
+          </Typography>
+          <Box sx={{ border: '1px solid var(--rlc-table-border)', borderRadius: 1, p: 0.9, bgcolor: '#f9fafb' }}>
+            <Typography sx={{ fontSize: 13, fontWeight: 800, color: '#111827', mb: 0.45 }}>
+              Winning Numbers (Date + Draw)
+            </Typography>
+            <Typography sx={{ fontSize: 13, lineHeight: 1.5 }}>
+              <span style={{ color: '#111827', fontWeight: 700 }}>First: </span>
+              <span style={{ color: '#dc2626', fontWeight: 800 }}>
+                {firstWinningNumbers.length ? firstWinningNumbers.join('   ') : '-'}
+              </span>
+            </Typography>
+            <Typography sx={{ fontSize: 13, lineHeight: 1.5 }}>
+              <span style={{ color: '#111827', fontWeight: 700 }}>Second: </span>
+              <span style={{ color: '#1d4ed8', fontWeight: 800 }}>
+                {secondWinningNumbers.length ? secondWinningNumbers.join('   ') : '-'}
+              </span>
+            </Typography>
           </Box>
         </Paper>
 
