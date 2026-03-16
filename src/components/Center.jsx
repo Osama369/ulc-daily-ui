@@ -3012,7 +3012,7 @@ function Center({ onSummaryChange }) {
       doc.text(`First Total: ${formatLedgerCurrency(totals.first)}`, 14, y);
       doc.text(`Second Total: ${formatLedgerCurrency(totals.second)}`, 60, y);
       doc.text(`Total: ${formatLedgerCurrency(net)}`, 106, y);
-      doc.text(`Commission (${commissionRate}%): ${formatLedgerCurrency(commissionAmount)}`, 140, y);
+      doc.text(`Commission: ${formatLedgerCurrency(commissionAmount)}`, 140, y);
       y += 5;
       doc.text(`Net After Commission: ${formatLedgerCurrency(netPayable)}`, 14, y);
       y += 5;
