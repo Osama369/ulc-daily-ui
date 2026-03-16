@@ -283,6 +283,7 @@ function Center({ onSummaryChange }) {
   const fInputRef = useRef(null);
   const sInputRef = useRef(null);
   const [autoMode, setAutoMode] = useState(false);
+  const syncAfterAddTimerRef = useRef(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
@@ -478,8 +479,13 @@ function Center({ onSummaryChange }) {
         });
       }
 
-      // Run a background authoritative sync to reconcile any drift
-      getAndSetVoucherData().catch(err => console.warn("Background sync failed:", err));
+      // Run a debounced background authoritative sync to reconcile any drift
+      if (syncAfterAddTimerRef.current) {
+        window.clearTimeout(syncAfterAddTimerRef.current);
+      }
+      syncAfterAddTimerRef.current = window.setTimeout(() => {
+        getAndSetVoucherData().catch(err => console.warn("Background sync failed:", err));
+      }, 300);
     } catch (error) {
       // Rollback optimistic UI on failure
       setVoucherData(prev);
@@ -515,6 +521,14 @@ function Center({ onSummaryChange }) {
       return [];
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (syncAfterAddTimerRef.current) {
+        window.clearTimeout(syncAfterAddTimerRef.current);
+      }
+    };
+  }, []);
 
   // Fetch winning numbers for the current draw/date context
   const getWinningNumbers = async (date, timeSlotId = null, persist = true) => {
@@ -609,6 +623,8 @@ function Center({ onSummaryChange }) {
   const isDistributorSearchView = role === "distributor" && isSearchActive;
   const localSearchSource = role === "distributor" ? null : entries;
   const tableEntries = isSearchActive ? (searchResults || []) : entries;
+  const [tableScrollTop, setTableScrollTop] = useState(0);
+  const [tableViewportHeight, setTableViewportHeight] = useState(520);
   const selectedEntryIdSet = useMemo(() => new Set(selectedEntries), [selectedEntries]);
 
   const groupedEntries = useMemo(() => {
@@ -640,6 +656,54 @@ function Center({ onSummaryChange }) {
   const noDataMessage = isSearchActive
     ? (searchLoading ? 'Searching entries...' : 'No matching NO entries found.')
     : 'No records found for the selected time slot / date.';
+
+  const ROW_HEIGHT = 44;
+  const ROW_OVERSCAN = 14;
+
+  const handleTableScroll = useCallback((event) => {
+    const next = event.currentTarget?.scrollTop || 0;
+    setTableScrollTop((prev) => (Math.abs(prev - next) >= 2 ? next : prev));
+  }, []);
+
+  useEffect(() => {
+    const container = tableContainerRef.current;
+    if (!container) return;
+
+    const updateHeight = () => {
+      const nextHeight = container.clientHeight || 520;
+      setTableViewportHeight((prev) => (prev !== nextHeight ? nextHeight : prev));
+    };
+
+    updateHeight();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [flatRows.length]);
+
+  const useVirtualRows = flatRows.length > 180;
+
+  const rowWindow = useMemo(() => {
+    if (!useVirtualRows) {
+      return {
+        rows: flatRows,
+        topSpacerHeight: 0,
+        bottomSpacerHeight: 0,
+      };
+    }
+
+    const total = flatRows.length;
+    const visibleCount = Math.max(20, Math.ceil(tableViewportHeight / ROW_HEIGHT) + ROW_OVERSCAN * 2);
+    const startIndex = Math.max(0, Math.floor(tableScrollTop / ROW_HEIGHT) - ROW_OVERSCAN);
+    const endIndex = Math.min(total, startIndex + visibleCount);
+
+    return {
+      rows: flatRows.slice(startIndex, endIndex),
+      topSpacerHeight: startIndex * ROW_HEIGHT,
+      bottomSpacerHeight: Math.max(0, (total - endIndex) * ROW_HEIGHT),
+    };
+  }, [flatRows, useVirtualRows, tableScrollTop, tableViewportHeight]);
 
   // Keep the latest appended entry visible.
   useEffect(() => {
@@ -4112,6 +4176,7 @@ function Center({ onSummaryChange }) {
                 return (
                     <TableContainer
                       ref={tableContainerRef}
+                      onScroll={handleTableScroll}
                       sx={{
                         flex: 1,
                         height: '100%',
@@ -4163,6 +4228,7 @@ function Center({ onSummaryChange }) {
               return (
                 <TableContainer
                   ref={tableContainerRef}
+                  onScroll={handleTableScroll}
                   sx={{
                     flex: 1,
                     height: '100%',
@@ -4217,7 +4283,17 @@ function Center({ onSummaryChange }) {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        flatRows.map((row) => (
+                        <>
+                          {useVirtualRows && rowWindow.topSpacerHeight > 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={isDistributorSearchView ? 6 : 5}
+                                sx={{ p: 0, border: 0, height: `${rowWindow.topSpacerHeight}px` }}
+                              />
+                            </TableRow>
+                          )}
+
+                          {rowWindow.rows.map((row) => (
                           <TableRow key={row.objectId || row._tempId || row.id} hover sx={{ borderBottom: '1px solid var(--rlc-table-border)' }}>
                             <TableCell padding="checkbox">
                               <Checkbox checked={selectedEntryIdSet.has(row.objectId || row.id)} onChange={() => toggleSelectEntry(row.objectId || row.id)} sx={{ color: 'var(--rlc-table-muted)', '&.Mui-checked': { color: 'var(--rlc-primary)' } }} />
@@ -4238,7 +4314,17 @@ function Center({ onSummaryChange }) {
                               )}
                             </TableCell>
                           </TableRow>
-                        ))
+                          ))}
+
+                          {useVirtualRows && rowWindow.bottomSpacerHeight > 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={isDistributorSearchView ? 6 : 5}
+                                sx={{ p: 0, border: 0, height: `${rowWindow.bottomSpacerHeight}px` }}
+                              />
+                            </TableRow>
+                          )}
+                        </>
                       )}
                     </TableBody>
                   </Table>
