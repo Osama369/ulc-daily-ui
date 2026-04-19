@@ -881,8 +881,8 @@ function Center({ onSummaryChange }) {
   const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const openDeleteConfirm = (parentId) => {
-    setDeleteTargetId(parentId || null);
+  const openDeleteConfirm = (entryId) => {
+    setDeleteTargetId(entryId || null);
     setDeleteDialogMode('single');
     setDeleteDialogOpen(true);
   };
@@ -902,7 +902,9 @@ function Center({ onSummaryChange }) {
     try {
       let deleteResponse;
       if (deleteDialogMode === 'single') {
-        deleteResponse = await axios.delete(`/api/v1/data/delete-data/${deleteTargetId}`);
+        deleteResponse = await axios.delete(`/api/v1/data/delete-individual-entries`, {
+          data: { entryIds: [deleteTargetId] }
+        });
         toast.success('Record deleted successfully');
       } else if (deleteDialogMode === 'multiple') {
         deleteResponse = await axios.delete(`/api/v1/data/delete-individual-entries`, {
@@ -914,8 +916,7 @@ function Center({ onSummaryChange }) {
       }
       await syncBalance(deleteResponse?.data?.newBalance);
 
-      // Refresh data
-      await fetchVoucherData();
+      // Single refresh path to reduce post-delete wait.
       await getAndSetVoucherData();
     } catch (error) {
       console.error('Error deleting records:', error);
@@ -4430,8 +4431,8 @@ function Center({ onSummaryChange }) {
                               </TableCell>
                             )}
                             <TableCell align="center">
-                              {row.isGroupStart && !isDistributorSearchView && (
-                                <IconButton aria-label="delete" size="small" disabled={isEntryLocked} onClick={() => openDeleteConfirm(row.parentId)} sx={{ bgcolor: 'var(--rlc-danger)', color: '#fff', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, minWidth: 40, height: 32, borderRadius: 1, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
+                              {!isDistributorSearchView && (
+                                <IconButton aria-label="delete" size="small" disabled={isEntryLocked} onClick={() => openDeleteConfirm(row.objectId || row.id)} sx={{ bgcolor: 'var(--rlc-danger)', color: '#fff', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, minWidth: 40, height: 32, borderRadius: 1, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
                                   <DeleteIcon fontSize="small" />
                                 </IconButton>
                               )}
