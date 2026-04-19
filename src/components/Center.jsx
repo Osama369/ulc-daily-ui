@@ -191,6 +191,14 @@ function Center({ onSummaryChange }) {
     return 0;
   };
 
+  const getStandardCommissionRateByCategory = (config, category) => {
+    if (category === 'HINSA') return Number(config?.singleFigure || 0);
+    if (category === 'AKRA') return Number(config?.doubleFigure || 0);
+    if (category === 'TANDOLA') return Number(config?.tripleFigure || 0);
+    if (category === 'PANGORA') return Number(config?.fourFigure || 0);
+    return 0;
+  };
+
   const getMultiplierForEntry = (config, category, number) => {
     if (category === 'HINSA') {
       return isCrossFigurePattern(number)
@@ -552,6 +560,35 @@ function Center({ onSummaryChange }) {
     } catch (error) {
       if (error?.response?.status === 404) return [];
       toast.error(error.response?.data?.error || "Failed to fetch records");
+      return [];
+    }
+  };
+
+  const fetchVoucherDataForReportParity = async (selectedDate, timeSlotId, options = {}) => {
+    const { requireClosed = false, suppressErrorToast = false } = options;
+    try {
+      const userId = userData?.user?._id;
+      const effectiveTimeSlotId = timeSlotId || selectedDraw?._id;
+      if (!userId) return [];
+      if (!effectiveTimeSlotId) {
+        if (!suppressErrorToast) toast.error("Please select a time slot to fetch records.");
+        return [];
+      }
+
+      const params = {
+        userId,
+        date: selectedDate || drawDate,
+        timeSlotId: effectiveTimeSlotId,
+      };
+      if (requireClosed) params.requireClosed = true;
+
+      const response = await axios.get("/api/v1/data/get-client-data", { params });
+      return response.data?.data || [];
+    } catch (error) {
+      if (error?.response?.status === 404) return [];
+      if (!suppressErrorToast) {
+        toast.error(error.response?.data?.error || "Failed to fetch records");
+      }
       return [];
     }
   };
@@ -2654,7 +2691,7 @@ function Center({ onSummaryChange }) {
     // these values come form user data profile 
     // then we can use directly here to calculate 
 
-    const fetchedEntries = await fetchVoucherData(drawDate, drawForPrint?._id);
+    const fetchedEntries = await fetchVoucherDataForReportParity(drawDate, drawForPrint?._id, { suppressErrorToast: true });
     if (fetchedEntries.length === 0) {
       toast("No Record found..");
       return;
@@ -2990,7 +3027,7 @@ function Center({ onSummaryChange }) {
 
       const commissionAmount = rows.reduce((sum, [num, f, s]) => {
         const rowSale = (Number(f) || 0) + (Number(s) || 0);
-        const rate = getCommissionRateForEntry(userConfig, title, num);
+        const rate = getStandardCommissionRateByCategory(userConfig, title);
         return sum + (rowSale * rate) / 100;
       }, 0);
       const netPayable = net - commissionAmount;
@@ -3664,17 +3701,15 @@ function Center({ onSummaryChange }) {
       },
     };
 
-    let hasAnyDrawData = false;
-
-    for (const draw of targetDraws) {
+    const drawSummaries = await Promise.all(targetDraws.map(async (draw) => {
       const secondPrizeDivisor = getSecondPrizeDivisorForSlot(draw);
-      const fetchedEntries = await fetchVoucherData(drawDate, draw?._id);
+      const fetchedEntries = await fetchVoucherDataForReportParity(drawDate, draw?._id, { suppressErrorToast: true });
       const allRows = [];
       (fetchedEntries || []).forEach((entry) => {
         if (Array.isArray(entry?.data)) allRows.push(...entry.data);
       });
       if (allRows.length === 0) {
-        continue;
+        return null;
       }
 
       const winningNumbersForDraw = await fetchWinningNumbersForDraw(drawDate, draw);
@@ -3702,9 +3737,11 @@ function Center({ onSummaryChange }) {
         rows.forEach(([num, f, s]) => {
           const rowF = Number(f) || 0;
           const rowS = Number(s) || 0;
-          const rate = getCommissionRateForEntry(selectedUser, cat, num);
-          const multiplier = getMultiplierForEntry(selectedUser, cat, num);
-          commission += (rowF + rowS) * rate / 100;
+          const normalRate = getStandardCommissionRateByCategory(selectedUser, cat);
+          const crossRate = getCommissionRateForEntry(selectedUser, cat, num);
+          const defaultMultiplier = Number(multipliers?.[cat] ?? 0) || 0;
+          const multiplier = getMultiplierForEntry(selectedUser, cat, num) || defaultMultiplier;
+          commission += (rowF + rowS) * (normalRate + crossRate) / 100;
           for (const winning of winningNumbersForDraw) {
             if (num === winning.number || checkPositionalMatch(num, winning.number)) {
               if (winning.type === 'first') prize += rowF * multiplier;
@@ -3716,30 +3753,38 @@ function Center({ onSummaryChange }) {
 
       const sale = firstSale + secondSale;
       if (sale === 0 && prize === 0) {
-        continue;
+        return null;
       }
-      hasAnyDrawData = true;
       const safi = sale - commission;
       const subTotal = safi - prize;
       const hissa = Math.abs(subTotal) * hissaShare;
 
-      result.drawRows.push({
+      return {
         drawId: draw?._id || null,
         drawName: formatTimeSlotLabel(draw) || 'Draw',
         sale,
         prize,
-      });
+        first: firstSale,
+        second: secondSale,
+        commission,
+        subTotal,
+        hissa,
+      };
+    }));
 
-      result.totals.first += firstSale;
-      result.totals.second += secondSale;
-      result.totals.sale += sale;
-      result.totals.prize += prize;
-      result.totals.commission += commission;
-      result.totals.subTotal += subTotal;
-      result.totals.hissa += hissa;
-    }
+    const validDrawSummaries = drawSummaries.filter(Boolean);
+    validDrawSummaries.forEach((row) => {
+      result.drawRows.push({ drawId: row.drawId, drawName: row.drawName, sale: row.sale, prize: row.prize });
+      result.totals.first += row.first;
+      result.totals.second += row.second;
+      result.totals.sale += row.sale;
+      result.totals.prize += row.prize;
+      result.totals.commission += row.commission;
+      result.totals.subTotal += row.subTotal;
+      result.totals.hissa += row.hissa;
+    });
 
-    if (!hasAnyDrawData || result.drawRows.length === 0) {
+    if (result.drawRows.length === 0) {
       toast('No records found for selected date');
       return;
     }
@@ -3978,7 +4023,16 @@ function Center({ onSummaryChange }) {
                 <Typography sx={{ fontSize: 12.5, fontWeight: 800, color: '#f3f4f6', textTransform: 'uppercase' }}>Type:</Typography>
                 <select
                   value={ledger}
-                  onChange={(e) => setLedger(e.target.value)}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    setLedger(nextType);
+                    if (nextType === 'DAILY BILL') {
+                      setDailyBillAllClosedForPrint(true);
+                      setSelectedClosedDrawForPrint(null);
+                    } else {
+                      setDailyBillAllClosedForPrint(false);
+                    }
+                  }}
                   style={{ background: '#f3f4f6', color: '#111827', padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(17,24,39,0.18)', minHeight: '28px', fontWeight: 700, fontSize: '0.95rem' }}
                 >
                   {REPORT_TYPE_OPTIONS.map((option) => (

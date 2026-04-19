@@ -15,7 +15,7 @@ const TotalSaleReport = () => {
   const [drawDate, setDrawDate] = useState(new Date().toISOString().split('T')[0]);
   const [drawTime, setDrawTime] = useState('11 AM');
   const [prizeType, setPrizeType] = useState('All');
-  // Single control: ledger will store category values 'general'|'demand'|'overlimit'
+  // Combined report mode: general or cross-only combined voucher
   const [ledger, setLedger] = useState('general');
   const [winningNumbers, setWinningNumbers] = useState([]);
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -450,6 +450,29 @@ const TotalSaleReport = () => {
     return [0,0,0];
   };
 
+  const isCrossFigurePattern = (value) => /^\+{1,3}\d$/.test(String(value || '').trim());
+  const isCrossAkraPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{2}$/, /^\d\+\d$/, /^\d{2}\+$/, /^\+\+\d{2}$/, /^\d\+\+\d$/, /^\+\d{2}\+$/, /^\+\d\+\d$/].some((re) => re.test(raw));
+  };
+  const isCrossTandolaPattern = (value) => {
+    const raw = String(value || '').trim();
+    return [/^\+\d{3}$/, /^\d\+\d{2}$/, /^\d{2}\+\d$/].some((re) => re.test(raw));
+  };
+  const isCrossVoucherEntry = (number) => {
+    const n = String(number || '').trim();
+    if (/^\d{1}$/.test(n) || (n.includes('+') && n.length === 2) || (n.split('+').length - 1 === 2 && n.length === 3) || (n.split('+').length - 1 === 3 && n.length === 4)) {
+      return isCrossFigurePattern(n);
+    }
+    if (/^\d{2}$/.test(n) || (n.includes('+') && n.length <= 3) || (n.split('+').length - 1 === 2 && n.length === 4)) {
+      return isCrossAkraPattern(n);
+    }
+    if (/^\d{3}$/.test(n) || (n.length === 4 && n.includes('+'))) {
+      return isCrossTandolaPattern(n);
+    }
+    return false;
+  };
+
   // Format numbers consistently to 2 decimal places and avoid
   // floating point artifacts like 5.1499999999999995.
   const formatCurrency = (value) => {
@@ -458,6 +481,7 @@ const TotalSaleReport = () => {
   };
 
   const generateCombinedVoucherPDF = async (printMode = false) => {
+    const isCrossCombined = ledger === 'cross';
     const fetchedEntries = await fetchCombinedVoucherData(selectedDraw);
 
     if (!fetchedEntries || fetchedEntries.length === 0) {
@@ -507,7 +531,9 @@ const TotalSaleReport = () => {
       }
     };
 
-    const allVoucherRows = entries.flatMap((entry) => (entry.data || []).map((item) => ({ number: item.uniqueId, first: item.firstPrice, second: item.secondPrice, dealer: entry.userId?.username, dealerId: entry.userId?.dealerId })));
+    const allVoucherRows = entries
+      .flatMap((entry) => (entry.data || []).map((item) => ({ number: item.uniqueId, first: item.firstPrice, second: item.secondPrice, dealer: entry.userId?.username, dealerId: entry.userId?.dealerId })))
+      .filter((row) => !isCrossCombined || isCrossVoucherEntry(row.number));
 
     const combinedEntries = {};
     allVoucherRows.forEach(({ number, first, second, dealer, dealerId }) => {
@@ -555,7 +581,8 @@ const TotalSaleReport = () => {
     };
 
     const addHeader = () => {
-      doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text('Total Sale Report', pageWidth/2, 15, { align: 'center' });
+      const title = isCrossCombined ? 'Total Cross Sale Voucher Report' : 'Total Sale Report';
+      doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.text(title, pageWidth/2, 15, { align: 'center' });
       doc.setFontSize(12); doc.setFont('helvetica','normal');
       // Show Dealer for regular users, Main Distributor for distributors
       if (role === 'user') {
@@ -604,7 +631,7 @@ const TotalSaleReport = () => {
     const safeISODate = (d) => { try { if (!d) return 'unknown_date'; const dt = typeof d === 'string' ? new Date(d) : new Date(d); if (isNaN(dt.getTime())) return 'unknown_date'; return dt.toISOString().split('T')[0]; } catch (e) { return 'unknown_date'; } };
     const slotFileLabel = selectedDraw ? (formatTimeSlotLabel(selectedDraw) || selectedDraw.title || selectedDraw.label || 'draw') : 'draw';
     const drawFileLabel = `${slotFileLabel.replace(/\s+/g,'_')}_${safeISODate(selectedDraw && selectedDraw.draw_date ? selectedDraw.draw_date : drawDate)}`;
-    const filename = `Combined_Voucher_${drawFileLabel}.pdf`;
+    const filename = `${isCrossCombined ? 'Combined_Cross_Voucher' : 'Combined_Voucher'}_${drawFileLabel}.pdf`;
     saveOrPrint(doc, filename);
     toast.success('Combined Voucher PDF processed');
   };
@@ -682,6 +709,7 @@ const TotalSaleReport = () => {
               style={{ width: '100%', background: 'var(--rlc-strip-black)', color: '#fff', padding: '8px 12px', borderRadius: 6, border: '1px solid #1f2937', minHeight: 38, fontWeight: 700 }}
             >
               <option value="general">Combined General</option>
+              <option value="cross">Combined Cross Sale Voucher</option>
             </select>
           </Box>
         </Box>

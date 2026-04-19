@@ -476,9 +476,7 @@ const Reports = () => {
 
     if (!sourceUserIds.length) return null;
 
-    let hasAnyDrawData = false;
-
-    for (const draw of targetDraws) {
+    const drawSummaries = await Promise.all(targetDraws.map(async (draw) => {
       const secondPrizeDivisor = getSecondPrizeDivisorForSlot(draw);
       const winningNumbersForDraw = await fetchWinningNumbersForDraw(dateParam, draw);
       let firstSale = 0;
@@ -559,7 +557,7 @@ const Reports = () => {
         let allRows = [];
         fetchedEntries.forEach(e => { if (Array.isArray(e.data)) allRows.push(...e.data); });
         if (allRows.length === 0) {
-          continue;
+          return null;
         }
 
         const rowsByCategory = { HINSA: [], AKRA: [], TANDOLA: [], PANGORA: [] };
@@ -597,14 +595,13 @@ const Reports = () => {
 
       const sale = firstSale + secondSale;
       if (sale === 0 && prize === 0) {
-        continue;
+        return null;
       }
-      hasAnyDrawData = true;
       const safi = sale - commission;
       const subTotal = safi - prize;
       const hissa = Math.abs(subTotal) * hissaShare;
 
-      result.drawRows.push({
+      return {
         drawId: draw._id,
         drawName: formatTimeSlotLabel(draw),
         first: firstSale,
@@ -615,16 +612,22 @@ const Reports = () => {
         safi,
         hissa,
         subTotal,
-      });
+      };
+    }));
 
-      result.totals.first += firstSale;
-      result.totals.second += secondSale;
-      result.totals.sale += sale;
-      result.totals.prize += prize;
-      result.totals.commission += commission;
-      result.totals.subTotal += subTotal;
-      result.totals.hissa += hissa;
-    }
+    const validDrawSummaries = drawSummaries.filter(Boolean);
+    if (!validDrawSummaries.length) return null;
+
+    validDrawSummaries.forEach((row) => {
+      result.drawRows.push(row);
+      result.totals.first += row.first;
+      result.totals.second += row.second;
+      result.totals.sale += row.sale;
+      result.totals.prize += row.prize;
+      result.totals.commission += row.commission;
+      result.totals.subTotal += row.subTotal;
+      result.totals.hissa += row.hissa;
+    });
 
     result.totals.safi = result.totals.sale - result.totals.commission;
     result.totals.subTotal = result.totals.safi - result.totals.prize;
@@ -638,7 +641,7 @@ const Reports = () => {
       result.totals.bill = result.totals.subTotal + result.totals.hissa;
     }
 
-    if (!hasAnyDrawData || result.drawRows.length === 0) return null;
+    if (result.drawRows.length === 0) return null;
     return result;
   };
   // Numeric helpers: avoid floating point drift and format consistently
@@ -2003,7 +2006,16 @@ const Reports = () => {
               className="px-3 py-2 rounded-lg border w-full"
               style={{ background: '#fff', color: 'var(--rlc-header-text)', borderColor: '#9ca3af' }}
               value={ledger}
-              onChange={(e) => setLedger(e.target.value)}
+              onChange={(e) => {
+                const nextType = e.target.value;
+                setLedger(nextType);
+                if (nextType === 'DAILY BILL') {
+                  setDailyBillAllClosed(true);
+                  setSelectedDraw(null);
+                } else {
+                  setDailyBillAllClosed(false);
+                }
+              }}
             >
               {reportTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
