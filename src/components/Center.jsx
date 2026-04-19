@@ -71,6 +71,8 @@ function Center({ onSummaryChange }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [reportProgress, setReportProgress] = useState({ active: false, name: '', percent: 0 });
+  const reportProgressTimerRef = useRef(null);
 
   const distributorRecordCount = entries.length;
   const distributorFirstTotal = useMemo(
@@ -82,6 +84,38 @@ function Center({ onSummaryChange }) {
     [entries]
   );
   const distributorGrandTotal = distributorFirstTotal + distributorSecondTotal;
+
+  const clearReportProgressTimer = useCallback(() => {
+    if (reportProgressTimerRef.current) {
+      window.clearInterval(reportProgressTimerRef.current);
+      reportProgressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => clearReportProgressTimer();
+  }, [clearReportProgressTimer]);
+
+  const startReportProgress = useCallback((name) => {
+    clearReportProgressTimer();
+    setReportProgress({ active: true, name: String(name || 'Report').trim(), percent: 8 });
+    reportProgressTimerRef.current = window.setInterval(() => {
+      setReportProgress((prev) => {
+        if (!prev.active) return prev;
+        const next = Math.min(prev.percent + 7, 92);
+        if (next === prev.percent) return prev;
+        return { ...prev, percent: next };
+      });
+    }, 320);
+  }, [clearReportProgressTimer]);
+
+  const finishReportProgress = useCallback(() => {
+    clearReportProgressTimer();
+    setReportProgress((prev) => ({ ...prev, percent: 100 }));
+    window.setTimeout(() => {
+      setReportProgress({ active: false, name: '', percent: 0 });
+    }, 320);
+  }, [clearReportProgressTimer]);
 
   useEffect(() => {
     if (typeof onSummaryChange !== 'function') return;
@@ -1135,7 +1169,7 @@ function Center({ onSummaryChange }) {
     }
   };
 
-  if (loading) {  // this is loading that is running in seprately 
+  if (loading && !reportProgress.active) {  // this is loading that is running in seprately 
     return <p className="text-center text-lg"><Spinner /></p>;
   }
 
@@ -3510,15 +3544,19 @@ function Center({ onSummaryChange }) {
 
 
   const handleDownloadPDF = async () => {
+    const selectedReportType = String(ledger || 'Report').trim();
+    startReportProgress(selectedReportType);
     const drawForPrint = selectedClosedDrawForPrint;
     const isDailyBillAllClosed = ledger === 'DAILY BILL' && dailyBillAllClosedForPrint;
 
     if (!isDailyBillAllClosed) {
       if (!drawForPrint) {
+        finishReportProgress();
         toast.error("Please select a closed draw in Draw Name before printing.");
         return;
       }
       if (!isSlotClosed(drawForPrint)) {
+        finishReportProgress();
         toast.error("Selected draw is not closed yet.");
         return;
       }
@@ -3542,6 +3580,8 @@ function Center({ onSummaryChange }) {
         return;
       }
       throw err;
+    } finally {
+      finishReportProgress();
     }
   };
 
@@ -3881,6 +3921,35 @@ function Center({ onSummaryChange }) {
 
   return (
     <div className="flex-1 flex flex-col overflow-x-hidden w-full" style={{ minHeight: 'calc(100vh - 96px)', width: '100%', boxSizing: 'border-box', paddingLeft: 0, background: 'var(--rlc-page-bg)', overflowY: 'hidden' }}>
+      {reportProgress.active && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.35)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div style={{ width: 'min(480px, 92vw)', background: '#ffffff', borderRadius: 10, border: '1px solid #d1d5db', boxShadow: '0 16px 40px rgba(2,6,23,0.22)', padding: 18 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+              Generating {reportProgress.name}
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+              Please wait while the PDF is being prepared.
+            </div>
+            <div style={{ width: '100%', height: 10, borderRadius: 999, background: '#e5e7eb', overflow: 'hidden' }}>
+              <div style={{ width: `${reportProgress.percent}%`, height: '100%', background: '#16a34a', transition: 'width 220ms linear' }} />
+            </div>
+            <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: '#111827', textAlign: 'right' }}>
+              {reportProgress.percent}%
+            </div>
+          </div>
+        </div>
+      )}
 
       <Box sx={{ width: '100%', maxWidth: 1320, mx: 0, mt: 0.16, px: { xs: 1.25, sm: 2 } }}>
         <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(0, 1.6fr) minmax(0, 1fr)', lg: 'minmax(0, 1.55fr) minmax(0, 0.95fr) minmax(270px, 0.9fr)' }, gap: 0.9, alignItems: 'start' }}>
@@ -4532,14 +4601,14 @@ function Center({ onSummaryChange }) {
         <Paper sx={{ borderRadius: 1.5, border: '1px solid var(--rlc-panel-navy-border)', overflow: 'hidden', bgcolor: 'var(--rlc-panel-navy)', gridColumn: { xs: 'auto', md: '1 / -1', lg: 'auto' }, display: 'flex', flexDirection: 'column', maxHeight: { lg: 'calc(100vh - 232px)' } }}>
           <Box sx={{ bgcolor: 'var(--rlc-card-green-dark)', color: '#ffffff', px: 1.1, py: 0.65, fontWeight: 800 }}>SCHEMES</Box>
           <Box sx={{ p: 1.1, display: 'flex', flexDirection: 'column', gap: 0.8, overflowY: 'auto', minHeight: 0 }}>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKR}><FaStar /> <FaStar /> <span>Palti AKR</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiTandula}><FaStar /> <FaStar /> <FaStar />  <span>Palti Tandula</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleChakriRing}><FaStar /> <FaStar /> <FaStar /> <span>24 tandola</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handle3FigureRingWithX}><FaStar /> <FaStar /> <FaStar /> <span>12 tandulla</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handle4FigurePacket}><FaStar /> <FaStar /> <FaStar /> <FaStar /> <span>Pangora palti</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleAKR2Figure}><span>AKR 6 jaga</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleAKR2Figure3Jaga}><span>F+M+B AKR</span></button>
-            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-sm text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleRingPlusAKR}><span>Ring + AKR</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKR}><FaStar /> <FaStar /> <span>آکڑا پلٹی</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiTandula}><FaStar /> <FaStar /> <FaStar />  <span>ٹنڈولا پلٹی</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleChakriRing}><FaStar /> <FaStar /> <FaStar /> <span>ٹنڈولا 24</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handle3FigureRingWithX}><FaStar /> <FaStar /> <FaStar /> <span>ٹنڈولا 12</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handle4FigurePacket}><FaStar /> <FaStar /> <FaStar /> <FaStar /> <span>پنگوڑا پلٹی</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleAKR2Figure}><span>آکڑا 6 جگہ</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleAKR2Figure3Jaga}><span>فرنٹ مڈل بیک آکڑا</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleRingPlusAKR}><span>ٹنڈولا+آکڑا</span></button>
           </Box>
         </Paper>
       </Box>

@@ -26,6 +26,16 @@ const Reports = () => {
   const [loading, setLoading] = useState(false);
   const [dailyBillAllClosed, setDailyBillAllClosed] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+  const [reportProgress, setReportProgress] = useState({ active: false, name: '', percent: 0 });
+  const reportProgressTimerRef = useRef(null);
+  const reportTypeOptions = useMemo(
+    () => [
+      ...REPORT_TYPE_OPTIONS,
+      { value: 'CROSS VOUCHER', label: 'Cross Voucher' },
+      { value: 'CROSS LEDGER', label: 'Cross Ledger' },
+    ],
+    []
+  );
 
   const toLocalISODate = (value) => {
     if (!value) return '';
@@ -36,6 +46,38 @@ const Reports = () => {
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
+
+  const clearReportProgressTimer = useCallback(() => {
+    if (reportProgressTimerRef.current) {
+      window.clearInterval(reportProgressTimerRef.current);
+      reportProgressTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => clearReportProgressTimer();
+  }, [clearReportProgressTimer]);
+
+  const startReportProgress = useCallback((name) => {
+    clearReportProgressTimer();
+    setReportProgress({ active: true, name: String(name || 'Report').trim(), percent: 8 });
+    reportProgressTimerRef.current = window.setInterval(() => {
+      setReportProgress((prev) => {
+        if (!prev.active) return prev;
+        const next = Math.min(prev.percent + 7, 92);
+        if (next === prev.percent) return prev;
+        return { ...prev, percent: next };
+      });
+    }, 320);
+  }, [clearReportProgressTimer]);
+
+  const finishReportProgress = useCallback(() => {
+    clearReportProgressTimer();
+    setReportProgress((prev) => ({ ...prev, percent: 100 }));
+    window.setTimeout(() => {
+      setReportProgress({ active: false, name: '', percent: 0 });
+    }, 320);
+  }, [clearReportProgressTimer]);
 
   const formatTimeSlotLabel = (slot) => {
     if (!slot) return '';
@@ -68,6 +110,15 @@ const Reports = () => {
     return [/^\+\d{3}$/, /^\d\+\d{2}$/, /^\d{2}\+\d$/].some((re) => re.test(raw));
   };
 
+  const isCrossEntryByCategory = (category, number) => {
+    if (category === 'HINSA') return isCrossFigurePattern(number);
+    if (category === 'AKRA') return isCrossAkraPattern(number);
+    if (category === 'TANDOLA') return isCrossTandolaPattern(number);
+    return false;
+  };
+
+  const isCrossOnlyScope = (scope) => String(scope || 'ALL').trim().toUpperCase() === 'CROSS';
+
   const getCommissionRateForEntry = (config, category, number) => {
     if (category === 'HINSA') {
       return isCrossFigurePattern(number)
@@ -86,6 +137,21 @@ const Reports = () => {
     }
     if (category === 'PANGORA') return Number(config?.fourFigure || 0);
     return 0;
+  };
+
+  const getStandardCommissionRateByCategory = (config, category) => {
+    if (category === 'HINSA') return Number(config?.singleFigure || 0);
+    if (category === 'AKRA') return Number(config?.doubleFigure || 0);
+    if (category === 'TANDOLA') return Number(config?.tripleFigure || 0);
+    if (category === 'PANGORA') return Number(config?.fourFigure || 0);
+    return 0;
+  };
+
+  const getCommissionRateForReport = (config, category, number, reportScope = 'ALL') => {
+    if (isCrossOnlyScope(reportScope)) {
+      return getCommissionRateForEntry(config, category, number);
+    }
+    return getStandardCommissionRateByCategory(config, category);
   };
 
   const getMultiplierForEntry = (config, category, number) => {
@@ -344,6 +410,11 @@ const Reports = () => {
       TANDOLA: Number(baseConfig.tripleFigure || 0),
       PANGORA: Number(baseConfig.fourFigure || 0),
     };
+    const crossRates = {
+      HINSA: Number(baseConfig.crossFigureCommission || 0),
+      AKRA: Number(baseConfig.crossAkraCommission || 0),
+      TANDOLA: Number(baseConfig.crossTandolaCommission || 0),
+    };
 
     const toISODate = (d) => toLocalISODate(d);
     const categorize = (num) => {
@@ -394,6 +465,7 @@ const Reports = () => {
       totals: { first: 0, second: 0, sale: 0, prize: 0, commission: 0, safi: 0, hissa: 0, subTotal: 0, bill: 0 },
       meta: {
         commissionLabel: `${rates.HINSA}%-${rates.AKRA}%-${rates.TANDOLA}%-${rates.PANGORA}%`,
+        crossCommissionLabel: `${crossRates.HINSA}%-${crossRates.AKRA}%-${crossRates.TANDOLA}%`,
         hissaPercent: (hissaShare * 100),
       },
     };
@@ -461,9 +533,11 @@ const Reports = () => {
             rows.forEach(([num, fVal, sVal]) => {
               const rowF = Number(fVal) || 0;
               const rowS = Number(sVal) || 0;
-              const commissionRate = getCommissionRateForEntry(cfg, cat, num);
-              const multiplier = getMultiplierForEntry(cfg, cat, num);
-              commission += (rowF + rowS) * commissionRate / 100;
+              const normalRate = getStandardCommissionRateByCategory(cfg, cat);
+              const crossRate = getCommissionRateForEntry(cfg, cat, num);
+              const defaultMultiplier = Number(clientMultipliers?.[cat] ?? 0) || 0;
+              const multiplier = getMultiplierForEntry(cfg, cat, num) || defaultMultiplier;
+              commission += (rowF + rowS) * (normalRate + crossRate) / 100;
               for (const winning of winningNumbersForDraw) {
                 if (num === winning.number || checkPositionalMatch(num, winning.number)) {
                   if (winning.type === 'first') prize += rowF * multiplier;
@@ -506,9 +580,11 @@ const Reports = () => {
           rows.forEach(([num, f, s]) => {
             const rowF = Number(f) || 0;
             const rowS = Number(s) || 0;
-            const commissionRate = getCommissionRateForEntry(baseConfig, cat, num);
-            const multiplier = getMultiplierForEntry(baseConfig, cat, num);
-            commission += (rowF + rowS) * commissionRate / 100;
+            const normalRate = getStandardCommissionRateByCategory(baseConfig, cat);
+            const crossRate = getCommissionRateForEntry(baseConfig, cat, num);
+            const defaultMultiplier = Number(multipliers?.[cat] ?? 0) || 0;
+            const multiplier = getMultiplierForEntry(baseConfig, cat, num) || defaultMultiplier;
+            commission += (rowF + rowS) * (normalRate + crossRate) / 100;
             for (const winning of winningNumbersForDraw) {
               if (num === winning.number || checkPositionalMatch(num, winning.number)) {
                 if (winning.type === 'first') prize += rowF * multiplier;
@@ -838,9 +914,10 @@ const Reports = () => {
 
     const isSelectedDrawClosed = () => isSlotClosed(selectedDraw);
 
-    const generateVoucherPDF = async ({ userId = null, date = null, timeSlotId = null, prizeTypeParam = 'All' } = {}) => {
+    const generateVoucherPDF = async ({ userId = null, date = null, timeSlotId = null, prizeTypeParam = 'All', reportScope = 'ALL' } = {}) => {
       // Ensure draw is closed before generating voucher
       if (!isSelectedDrawClosed()) { toast.error('Draw is not close yet'); return; }
+      const crossOnly = isCrossOnlyScope(reportScope);
       // prefer explicit args, otherwise use current selection
       const fetchDate = date || drawDate;
       const fetchTimeSlot = timeSlotId || (selectedDraw && selectedDraw._id ? selectedDraw._id : drawTime);
@@ -870,6 +947,7 @@ const Reports = () => {
           (number.split('+').length - 1 === 2 && number.length === 3) || 
           (number.split('+').length - 1 === 3 && number.length === 4)
         ) {
+          if (crossOnly && !isCrossEntryByCategory('HINSA', number)) return;
           // Single digit numbers go to hinsa
           if (prizeTypeParam === 'All' || prizeTypeParam === 'Hinsa') hinsa.push([number, first, second]);
         } else if (
@@ -877,13 +955,16 @@ const Reports = () => {
           (number.includes('+') && number.length <= 3) ||
           (number.split('+').length - 1 === 2 && number.length === 4)
         ) {
+          if (crossOnly && !isCrossEntryByCategory('AKRA', number)) return;
           if (prizeTypeParam === 'All' || prizeTypeParam === 'Akra') akra.push([number, first, second]);
         } else if (
           /^\d{3}$/.test(number) ||
           (number.length === 4 && number.includes('+'))
         ) {
+          if (crossOnly && !isCrossEntryByCategory('TANDOLA', number)) return;
           if (prizeTypeParam === 'All' || prizeTypeParam === 'Tandola') tandola.push([number, first, second]);
         } else if (/^\d{4}$/.test(number)) {
+          if (crossOnly) return;
           if (prizeTypeParam === 'All' || prizeTypeParam === 'Pangora') pangora.push([number, first, second]);
         }
       });
@@ -937,7 +1018,7 @@ const Reports = () => {
     
     const drawHeaderLabel = selectedDraw ? `${formatTimeSlotLabel(selectedDraw)}${selectedDraw.isActive === false ? ' (Closed)' : selectedDraw.isActive === true ? ' (Active)' : ''}` : `${drawDate} ${drawTime}`;
 
-    const addHeader = (titleLabel = 'Voucher') => {
+    const addHeader = (titleLabel = crossOnly ? 'Cross Sale Voucher' : 'Voucher') => {
         doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
     // Title
@@ -988,7 +1069,7 @@ const Reports = () => {
           const firstCents = Math.round((Number(first) || 0) * 100);
           const secondCents = Math.round((Number(second) || 0) * 100);
           const rowSaleCents = firstCents + secondCents;
-          const commissionRate = getCommissionRateForEntry(baseUserConfig, title, num);
+          const commissionRate = getCommissionRateForReport(baseUserConfig, title, num, reportScope);
           commissionAmountCents += Math.round(rowSaleCents * commissionRate / 100);
         });
         const netAfterCommissionCents = sectionTotalCents - commissionAmountCents;
@@ -1194,13 +1275,15 @@ const Reports = () => {
         // ignore
       }
 
-      const voucherSlotLabel = selectedDraw ? formatTimeSlotLabel(selectedDraw) : (drawTime || "TimeSlot");
+        const voucherSlotLabel = selectedDraw ? formatTimeSlotLabel(selectedDraw) : (drawTime || "TimeSlot");
       const safeVoucherSlot = String(voucherSlotLabel).replace(/\s+/g, "_").replace(/[^A-Za-z0-9_-]/g, "") || "TimeSlot";
-      doc.save(`Sale_Voucher_Sheet_${safeVoucherSlot}_RLC.pdf`);
+        const voucherPrefix = crossOnly ? 'Cross_Sale_Voucher_Sheet' : 'Sale_Voucher_Sheet';
+        doc.save(`${voucherPrefix}_${safeVoucherSlot}_RLC.pdf`);
       toast.success("Voucher PDF by sections downloaded successfully!");
   };
 
-  const generateLedgerPDF = async () => {
+      const generateLedgerPDF = async ({ reportScope = 'ALL' } = {}) => {
+        const crossOnly = isCrossOnlyScope(reportScope);
   
       const fetchedEntries = await fetchVoucherData(drawDate, drawTime);
       if (fetchedEntries.length === 0) {
@@ -1225,6 +1308,7 @@ const Reports = () => {
           (number.split('+').length - 1 === 2 && number.length === 3) || 
           (number.split('+').length - 1 === 3 && number.length === 4)
         ) {
+          if (crossOnly && !isCrossEntryByCategory('HINSA', number)) return;
           // Single digit numbers go to hinsa
           hinsa.push([number, first, second]);
         } else if (
@@ -1232,13 +1316,16 @@ const Reports = () => {
           (number.includes('+') && number.length <= 3) ||
           (number.split('+').length - 1 === 2 && number.length === 4)
         ) {
+          if (crossOnly && !isCrossEntryByCategory('AKRA', number)) return;
           akra.push([number, first, second]);
         } else if (
           /^\d{3}$/.test(number) ||
           (number.length === 4 && number.includes('+'))
         ) {
+          if (crossOnly && !isCrossEntryByCategory('TANDOLA', number)) return;
           tandola.push([number, first, second]);
         } else if (/^\d{4}$/.test(number)) {
+          if (crossOnly) return;
           pangora.push([number, first, second]);
         }
       });
@@ -1248,8 +1335,9 @@ const Reports = () => {
       const addHeader = () => {
         doc.setFont("helvetica", "bold");
         doc.setFontSize(18);
+        const titlePrefix = crossOnly ? 'Cross Ledger Sheet' : 'Ledger Sheet';
         const titleSuffix = prizeType && prizeType !== 'All' ? ` (${prizeType})` : "";
-        doc.text(`Ledger Sheet${titleSuffix}`, pageWidth / 2, 15, { align: "center" });
+        doc.text(`${titlePrefix}${titleSuffix}`, pageWidth / 2, 15, { align: "center" });
 
         doc.setFontSize(12);
         doc.setFont("helvetica", "normal");
@@ -1380,7 +1468,7 @@ const Reports = () => {
         // compute commission for this section
         const commissionAmount = rows.reduce((sum, [num, f, s]) => {
           const sale = (Number(f) || 0) + (Number(s) || 0);
-          const rate = getCommissionRateForEntry(baseUserConfig, title, num);
+          const rate = getCommissionRateForReport(baseUserConfig, title, num, reportScope);
           return sum + (sale * rate) / 100;
         }, 0);
         const netPayable = net - commissionAmount;
@@ -1406,7 +1494,7 @@ const Reports = () => {
         doc.text(`First Total: ${formatCurrency(totals.first)}`, 14, y);
         doc.text(`Second Total: ${formatCurrency(totals.second)}`, 60, y);
         doc.text(`Total: ${formatCurrency(net)}`, 106, y);
-        doc.text(`Commission (${commissionRate}%): ${formatCurrency(commissionAmount)}`, 140, y);
+        doc.text(`Commission: ${formatCurrency(commissionAmount)}`, 140, y);
         y += 5;
         doc.text(`Net After Commission: ${formatCurrency(netPayable)}`, 14, y);
         y += 5;
@@ -1661,7 +1749,8 @@ const Reports = () => {
   
       const ledgerSlotLabel = selectedDraw ? formatTimeSlotLabel(selectedDraw) : (drawTime || "TimeSlot");
       const safeLedgerSlot = String(ledgerSlotLabel).replace(/\s+/g, "_").replace(/[^A-Za-z0-9_-]/g, "") || "TimeSlot";
-      doc.save(`Ledger_Sheet_RLC_${safeLedgerSlot}.pdf`);
+        const ledgerPrefix = crossOnly ? 'Cross_Ledger_Sheet_RLC' : 'Ledger_Sheet_RLC';
+        doc.save(`${ledgerPrefix}_${safeLedgerSlot}.pdf`);
       toast.success("Ledger PDF downloaded successfully!");
   };
 
@@ -1710,6 +1799,8 @@ const Reports = () => {
       y += 7;
       doc.text(`Dealer Name: ${dealerName}`, x, y);
       doc.text(`City: ${dealerCity}`, x + 62, y);
+      doc.text(`Cross Comm: ${result.meta?.crossCommissionLabel || ''}`, x + 110, y);
+      y += 7;
       doc.text(`Profit/Loss Share: ${formatCurrency(result.meta?.hissaPercent || 0)}%`, x + 110, y);
       y += 8;
 
@@ -1791,6 +1882,8 @@ const Reports = () => {
 
   // PDF export (simple)
   const handleDownloadPDF = async () => {
+    const selectedReportType = String(ledger || 'Report').trim();
+    startReportProgress(selectedReportType);
     try {
       await runReportExportByType({
         type: ledger,
@@ -1803,6 +1896,15 @@ const Reports = () => {
               prizeTypeParam: prizeType,
             }),
           LEDGER: () => generateLedgerPDF(),
+          'CROSS VOUCHER': () =>
+            generateVoucherPDF({
+              userId: role === 'user' ? currentUserId : selectedClient,
+              date: drawDate,
+              timeSlotId: selectedDraw?._id,
+              prizeTypeParam: prizeType,
+              reportScope: 'CROSS',
+            }),
+          'CROSS LEDGER': () => generateLedgerPDF({ reportScope: 'CROSS' }),
           'DAILY BILL': () => generateDailyBillPDF(),
         },
       });
@@ -1812,6 +1914,8 @@ const Reports = () => {
         return;
       }
       throw err;
+    } finally {
+      finishReportProgress();
     }
   };
 
@@ -1819,6 +1923,35 @@ const Reports = () => {
 
   return (
     <div className="p-4 md:p-6 rounded-xl border max-w-6xl mx-auto w-full" style={{ background: 'var(--rlc-page-bg)', color: 'var(--rlc-header-text)', borderColor: 'var(--rlc-table-border)' }}>
+      {reportProgress.active && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(2,6,23,0.35)',
+            zIndex: 2000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+          }}
+        >
+          <div style={{ width: 'min(480px, 92vw)', background: '#ffffff', borderRadius: 10, border: '1px solid #d1d5db', boxShadow: '0 16px 40px rgba(2,6,23,0.22)', padding: 18 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', marginBottom: 6 }}>
+              Generating {reportProgress.name}
+            </div>
+            <div style={{ fontSize: 13, color: '#374151', marginBottom: 10 }}>
+              Please wait while the PDF is being prepared.
+            </div>
+            <div style={{ width: '100%', height: 10, borderRadius: 999, background: '#e5e7eb', overflow: 'hidden' }}>
+              <div style={{ width: `${reportProgress.percent}%`, height: '100%', background: '#16a34a', transition: 'width 220ms linear' }} />
+            </div>
+            <div style={{ marginTop: 8, fontSize: 13, fontWeight: 700, color: '#111827', textAlign: 'right' }}>
+              {reportProgress.percent}%
+            </div>
+          </div>
+        </div>
+      )}
       <h2 className="text-2xl font-bold mb-4">Client Reports</h2>
       <div className="flex flex-wrap items-end gap-3 md:gap-4 mb-4">
         <div className="min-w-[150px]">
@@ -1872,7 +2005,7 @@ const Reports = () => {
               value={ledger}
               onChange={(e) => setLedger(e.target.value)}
             >
-              {REPORT_TYPE_OPTIONS.map((option) => (
+              {reportTypeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
