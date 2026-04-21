@@ -532,10 +532,9 @@ const Reports = () => {
               const rowF = Number(fVal) || 0;
               const rowS = Number(sVal) || 0;
               const normalRate = getStandardCommissionRateByCategory(cfg, cat);
-              const crossRate = getCommissionRateForEntry(cfg, cat, num);
               const defaultMultiplier = Number(clientMultipliers?.[cat] ?? 0) || 0;
               const multiplier = getMultiplierForEntry(cfg, cat, num) || defaultMultiplier;
-              commission += (rowF + rowS) * (normalRate + crossRate) / 100;
+              commission += (rowF + rowS) * normalRate / 100;
               for (const winning of winningNumbersForDraw) {
                 if (num === winning.number || checkPositionalMatch(num, winning.number)) {
                   if (winning.type === 'first') prize += rowF * multiplier;
@@ -579,10 +578,9 @@ const Reports = () => {
             const rowF = Number(f) || 0;
             const rowS = Number(s) || 0;
             const normalRate = getStandardCommissionRateByCategory(baseConfig, cat);
-            const crossRate = getCommissionRateForEntry(baseConfig, cat, num);
             const defaultMultiplier = Number(multipliers?.[cat] ?? 0) || 0;
             const multiplier = getMultiplierForEntry(baseConfig, cat, num) || defaultMultiplier;
-            commission += (rowF + rowS) * (normalRate + crossRate) / 100;
+            commission += (rowF + rowS) * normalRate / 100;
             for (const winning of winningNumbersForDraw) {
               if (num === winning.number || checkPositionalMatch(num, winning.number)) {
                 if (winning.type === 'first') prize += rowF * multiplier;

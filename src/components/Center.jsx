@@ -3739,10 +3739,9 @@ function Center({ onSummaryChange }) {
           const rowF = Number(f) || 0;
           const rowS = Number(s) || 0;
           const normalRate = getStandardCommissionRateByCategory(selectedUser, cat);
-          const crossRate = getCommissionRateForEntry(selectedUser, cat, num);
           const defaultMultiplier = Number(multipliers?.[cat] ?? 0) || 0;
           const multiplier = getMultiplierForEntry(selectedUser, cat, num) || defaultMultiplier;
-          commission += (rowF + rowS) * (normalRate + crossRate) / 100;
+          commission += (rowF + rowS) * normalRate / 100;
           for (const winning of winningNumbersForDraw) {
             if (num === winning.number || checkPositionalMatch(num, winning.number)) {
               if (winning.type === 'first') prize += rowF * multiplier;
