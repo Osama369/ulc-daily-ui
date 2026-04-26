@@ -325,7 +325,34 @@ function Center({ onSummaryChange }) {
   const fInputRef = useRef(null);
   const sInputRef = useRef(null);
   const [autoMode, setAutoMode] = useState(false);
-  const syncAfterAddTimerRef = useRef(null);
+  useEffect(() => {
+    voucherDataRef.current = entries;
+  }, [entries]);
+
+  const normalizeVoucherRows = useCallback((records, expectedTimeSlotId = null) => {
+    if (!Array.isArray(records) || records.length === 0) return [];
+    const normalizedRows = [];
+
+    records.forEach((record) => {
+      const recordTimeSlotId = record?.timeSlotId?._id || record?.timeSlotId || record?._doc?.timeSlotId;
+      if (expectedTimeSlotId && String(recordTimeSlotId) !== String(expectedTimeSlotId)) {
+        return;
+      }
+
+      (record?.data || []).forEach((item) => {
+        normalizedRows.push({
+          parentId: record?._id || null,
+          objectId: item?._id,
+          no: item?.uniqueId,
+          f: item?.firstPrice,
+          s: item?.secondPrice,
+          selected: false,
+        });
+      });
+    });
+
+    return normalizedRows;
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(new Date()), 1000);
@@ -493,41 +520,34 @@ function Center({ onSummaryChange }) {
       });
       await syncBalance(response.data?.newBalance);
 
-      // If server returns created data, reconcile quickly
-      const created = response.data?.data || response.data?.created || null;
-      if (Array.isArray(created) && created.length > 0) {
-        // Flatten created entries into table rows if API returns parent docs
-        const createdRows = created.flatMap((record) =>
-          (record.data || []).map(item => ({
-            parentId: record._id || null,
-            objectId: item._id,
-            no: item.uniqueId,
-            f: item.firstPrice,
-            s: item.secondPrice,
-            selected: false,
-          }))
-        );
+      // If server returns created data, reconcile quickly without a full refetch.
+      const createdSource = response.data?.newData
+        ? [response.data.newData]
+        : Array.isArray(response.data?.created)
+          ? response.data.created
+          : Array.isArray(response.data?.data)
+            ? response.data.data
+            : [];
+      const createdRows = normalizeVoucherRows(createdSource, selectedDraw?._id);
 
-        // Replace temp items for matching uniqueIds, keep newest rows appended at bottom
+      if (createdRows.length > 0) {
         setVoucherData(prevArr => {
-          const uniqueIds = new Set(createdRows.map(r => r.no));
-          const remaining = prevArr.filter(p => !p._tempId || !uniqueIds.has(p.no));
+          const tempKeys = new Set(tempItems.map((item) => `${item.no}|${item.f}|${item.s}`));
+          const remaining = prevArr.filter((row) => {
+            if (!row?._tempId) return true;
+            return !tempKeys.has(`${row.no}|${row.f}|${row.s}`);
+          });
           return [...remaining, ...createdRows];
         });
         setEntries(prev => {
-          const uniqueIds = new Set(createdRows.map(r => r.no));
-          const remaining = prev.filter(p => !p._tempId || !uniqueIds.has(p.no));
+          const tempKeys = new Set(tempItems.map((item) => `${item.no}|${item.f}|${item.s}`));
+          const remaining = prev.filter((row) => {
+            if (!row?._tempId) return true;
+            return !tempKeys.has(`${row.no}|${row.f}|${row.s}`);
+          });
           return [...remaining, ...createdRows];
         });
       }
-
-      // Run a debounced background authoritative sync to reconcile any drift
-      if (syncAfterAddTimerRef.current) {
-        window.clearTimeout(syncAfterAddTimerRef.current);
-      }
-      syncAfterAddTimerRef.current = window.setTimeout(() => {
-        getAndSetVoucherData().catch(err => console.warn("Background sync failed:", err));
-      }, 300);
     } catch (error) {
       // Rollback optimistic UI on failure
       setVoucherData(prev);
@@ -552,9 +572,6 @@ function Center({ onSummaryChange }) {
       const response = await axios.get("/api/v1/data/get-data", {
         params,
       });
-
-      console.log("getDatabydate", response);
-
 
       return response.data.data;
     } catch (error) {
@@ -592,14 +609,6 @@ function Center({ onSummaryChange }) {
       return [];
     }
   };
-
-  useEffect(() => {
-    return () => {
-      if (syncAfterAddTimerRef.current) {
-        window.clearTimeout(syncAfterAddTimerRef.current);
-      }
-    };
-  }, []);
 
   // Fetch winning numbers for the current draw/date context
   const getWinningNumbers = async (date, timeSlotId = null, persist = true) => {
@@ -659,34 +668,9 @@ function Center({ onSummaryChange }) {
     }
 
     const fetchedData = await fetchVoucherData(drawDate, timeSlotId);
-
-    if (Array.isArray(fetchedData) && fetchedData.length > 0) {
-      // Only use records that match the selected timeSlot (backend should already filter by timeSlotId)
-      const filteredRecords = fetchedData.filter((record) => {
-        const recordSlotId = record.timeSlotId?._id || record.timeSlotId || record._doc?.timeSlotId;
-        return String(recordSlotId) === String(selectedDraw._id);
-      });
-
-      const combinedEntries = filteredRecords.flatMap((record) =>
-        record.data.map((item, index) => ({
-          parentId: record._id, // to keep track of the parent record
-          objectId: item._id, // to keep track of the parent record
-          // serial: index + 1, // creates a unique-enough ID without needing global index
-          no: item.uniqueId,
-          f: item.firstPrice,
-          s: item.secondPrice,
-          selected: false,
-        }))
-      );
-
-      setVoucherData(combinedEntries);
-      setEntries(combinedEntries);
-      console.log("combined entires", combinedEntries);  // jo bhi entries hongi wo yengi
-
-    } else {
-      setVoucherData([]);
-      setEntries([]);
-    }
+    const combinedEntries = normalizeVoucherRows(fetchedData, timeSlotId);
+    setVoucherData(combinedEntries);
+    setEntries(combinedEntries);
   };
 
   const searchNeedle = String(searchNumber || "").trim();
