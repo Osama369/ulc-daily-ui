@@ -683,7 +683,7 @@ function Center({ onSummaryChange }) {
         return [];
       }
     } catch (error) {
-      console.error("Error fetching winning numbers:", error);
+      // console.error("Error fetching winning numbers:", error);
       // toast.error("Failed to fetch winning numbers");
       if (persist) setWinningNumbers([]);
       return [];
