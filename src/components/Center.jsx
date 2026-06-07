@@ -74,6 +74,35 @@ function Center({ onSummaryChange }) {
   const [reportProgress, setReportProgress] = useState({ active: false, name: '', percent: 0 });
   const reportProgressTimerRef = useRef(null);
 
+  const playEntryErrorBeep = useCallback(() => {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        const audioContext = new AudioContextClass();
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(520, audioContext.currentTime);
+        oscillator.frequency.setValueAtTime(320, audioContext.currentTime + 0.08);
+        gain.gain.setValueAtTime(0.55, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.28);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.28);
+      }
+      if (navigator.vibrate) navigator.vibrate([120, 40, 120]);
+    } catch (error) {
+      if (navigator.vibrate) navigator.vibrate([120, 40, 120]);
+    }
+  }, []);
+
+  const showEntryError = useCallback((message) => {
+    playEntryErrorBeep();
+    toast.error(message);
+  }, [playEntryErrorBeep]);
+
   const distributorRecordCount = entries.length;
   const distributorFirstTotal = useMemo(
     () => entries.reduce((sum, e) => sum + (Number(e.f) || 0), 0),
@@ -457,7 +486,7 @@ function Center({ onSummaryChange }) {
   const addEntry = async (customeEntries = null) => {
     const dataToAdd = customeEntries || entries;
     if (!dataToAdd || dataToAdd.length === 0) {
-      toast("No record to save! ⚠️");
+      showEntryError("No record to save!");
       return;
     }
 
@@ -467,7 +496,7 @@ function Center({ onSummaryChange }) {
       return !isValidFSAmount(entry?.f) || !isValidFSAmount(entry?.s);
     });
     if (hasInvalidAmount) {
-      toast.error("F and S must be 0 or multiples of 5 (0, 5, 10, 15...).");
+      showEntryError("F and S must be 0 or multiples of 5 (0, 5, 10, 15...).");
       return;
     }
 
@@ -485,11 +514,11 @@ function Center({ onSummaryChange }) {
       payload.date = drawDate;
       // Prevent saving to closed/inactive time slots
       if (selectedDraw.isActive === false) {
-        toast.error('Selected time slot is closed. Cannot save records.');
+        showEntryError('Selected time slot is closed. Cannot save records.');
         return;
       }
     } else {
-      toast.error("Please select a time slot before saving.");
+      showEntryError("Please select a time slot before saving.");
       return;
     }
 
@@ -511,7 +540,6 @@ function Center({ onSummaryChange }) {
     // Optimistically update UI (do not clear input fields here — keep existing input flow)
     setVoucherData(prevArr => [ ...prevArr , ...tempItems]);
     setEntries(prevArr => [ ...prevArr, ...tempItems]);
-    toast.success("Record queued for save ✅");
 
     try {
       // Send to server (do not block UI on final refresh)
@@ -548,13 +576,19 @@ function Center({ onSummaryChange }) {
           return [...remaining, ...createdRows];
         });
       }
+      toast.success("Record saved successfully");
     } catch (error) {
       // Rollback optimistic UI on failure
       setVoucherData(prev);
       setEntries(prev);
       dispatch(hideLoading());
       console.error("Error adding entries:", error.response?.data?.error || error.message);
-      toast.error(error.response?.data?.error || "Failed to add record ❌");
+      const failedNumbers = dataToAdd
+        .map((entry) => String(entry?.no || '').trim())
+        .filter(Boolean)
+        .join(', ');
+      const serverMessage = error.response?.data?.error || error.message || "Network/server error";
+      showEntryError(`Entry ${failedNumbers || 'NO'} not posted: ${serverMessage}`);
     }
   };
 
@@ -1108,13 +1142,29 @@ function Center({ onSummaryChange }) {
     }
   };
 
-  // Auto-detect simple '+N' single entries (allow +, ++, +++ prefixes)
+  const isAllowedManualSingleNo = (value) => {
+    const raw = String(value || '').trim();
+    return [
+      /^\d{1,4}$/,
+      /^\+\d{1,2}$/,
+      /^\+\+\d{1,2}$/,
+      /^\+\+\+\d$/,
+      /^\d\+\+\d$/,
+      /^\+\d{2}\+$/,
+      /^\+\d\+\d$/,
+      /^\+\d{3}$/,
+      /^\d\+\d{2}$/,
+      /^\d{2}\+\d$/,
+    ].some((re) => re.test(raw));
+  };
+
+  // Auto-detect whitelisted plus-prefix single entries.
   const handleFigureToSingle = () => {
     if (isPastClosingTime()) return false;
     if (!no || !f || !s) return false;
     const raw = String(no).trim();
-    // match +N, ++N, +++N with one or more digits after pluses
-    if (!/^\+{1,3}\d+$/.test(raw)) return false;
+    const allowed = [/^\+\d{1,2}$/, /^\+\+\d{1,2}$/, /^\+\+\+\d$/];
+    if (!allowed.some((re) => re.test(raw))) return false;
 
     const entry = {
       id: entries.length + 1,
@@ -1416,15 +1466,21 @@ function Center({ onSummaryChange }) {
   const handleSingleEntrySubmit = () => {
 
     if (isPastClosingTime()) {
-      toast("Draw is closed. Cannot add entries.");
+      showEntryError("Draw is closed. Cannot add entries.");
       return;
     }
     if (selectedDraw?.isActive === false) {
-      toast.error("Selected time slot is closed. Cannot add entries.");
+      showEntryError("Selected time slot is closed. Cannot add entries.");
       return;
     }
     if (!no || !f || !s) {
-      toast("Please fill all fields.");
+      showEntryError("Please fill all fields.");
+      return;
+    }
+
+    const rawNo = String(no || '').trim();
+    if (!isAllowedManualSingleNo(rawNo)) {
+      showEntryError(`Entry ${rawNo || 'NO'} not posted: invalid single-entry number/pattern.`);
       return;
     }
      
