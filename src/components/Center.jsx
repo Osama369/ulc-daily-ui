@@ -950,6 +950,8 @@ function Center({ onSummaryChange }) {
   // Selection and clipboard states/handlers
   const [selectAll, setSelectAll] = useState(false);
   const [copiedEntries, setCopiedEntries] = useState([]);
+  const [noSmsText, setNoSmsText] = useState("");
+  const [showNoSmsModal, setShowNoSmsModal] = useState(false);
 
   const toggleSelectEntry = useCallback((id) => {
     setSelectedEntries(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -974,6 +976,62 @@ function Center({ onSummaryChange }) {
       .map(e => ({ no: e.no, f: e.f, s: e.s }));
     setCopiedEntries(selected);
     toast.success(`${selected.length} entries copied`);
+  };
+
+  const copyTextToClipboard = async (text) => {
+    const value = String(text || "");
+    if (!value) return false;
+
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return copied;
+  };
+
+  const handleConvertNoSms = () => {
+    if (!selectedEntries || selectedEntries.length === 0) {
+      toast("No entries selected to convert");
+      return;
+    }
+
+    const selectedNos = flatRows
+      .filter((e) => selectedEntryIdSet.has(e.objectId || e.id))
+      .map((e) => String(e.no || "").trim())
+      .filter(Boolean);
+
+    if (!selectedNos.length) {
+      toast.error("Selected entries have no NO value");
+      return;
+    }
+
+    setNoSmsText(selectedNos.join("="));
+    setShowNoSmsModal(true);
+  };
+
+  const closeNoSmsModal = () => {
+    setShowNoSmsModal(false);
+    setNoSmsText("");
+  };
+
+  const handleCopyNoSms = async () => {
+    try {
+      const copied = await copyTextToClipboard(noSmsText);
+      if (copied) toast.success("NO-SMS copied to clipboard");
+      else toast.error("Unable to copy NO-SMS");
+    } catch (error) {
+      toast.error("Unable to copy NO-SMS");
+    }
   };
 
   const handlePasteCopied = async () => {
@@ -4306,11 +4364,12 @@ function Center({ onSummaryChange }) {
 
             {/* Table Header */}
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.55, flexShrink: 0, overflowX: 'auto', overflowY: 'hidden' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'nowrap', minWidth: 0 }}>
-                <Button variant="contained" onClick={openDeleteSelectedConfirm} disabled={isDistributorSearchView || isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 126, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-danger)', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Delete Selected</Button>
-                <Button variant="contained" onClick={handleCopySelected} disabled={isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 78, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-secondary)', '&:hover': { bgcolor: 'var(--rlc-secondary-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Copy</Button>
-                <Button variant="contained" onClick={handlePasteCopied} disabled={isEntryLocked} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 78, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-primary)', '&:hover': { bgcolor: 'var(--rlc-primary-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Paste</Button>
-                <Button variant="contained" disabled={isEntryLocked} onClick={() => { setSmsInput(""); setParsedEntries([]); setShowModal(true); }} sx={{ fontSize: 14, fontWeight: 700, letterSpacing: 0.2, height: 42, minWidth: 96, whiteSpace: 'nowrap', bgcolor: '#7c3aed', '&:hover': { bgcolor: '#6d28d9' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Paste SMS</Button>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.45, flexWrap: 'nowrap', minWidth: 0 }}>
+                <Button variant="contained" onClick={openDeleteSelectedConfirm} disabled={isDistributorSearchView || isEntryLocked} sx={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.1, height: 34, minWidth: 104, px: 1, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-danger)', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Delete Selected</Button>
+                <Button variant="contained" onClick={handleCopySelected} disabled={isEntryLocked} sx={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.1, height: 34, minWidth: 58, px: 1, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-secondary)', '&:hover': { bgcolor: 'var(--rlc-secondary-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Copy</Button>
+                <Button variant="contained" onClick={handleConvertNoSms} disabled={isEntryLocked} sx={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.1, height: 34, minWidth: 116, px: 1, whiteSpace: 'nowrap', bgcolor: '#0f766e', '&:hover': { bgcolor: '#115e59' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Convert NO-SMS</Button>
+                <Button variant="contained" onClick={handlePasteCopied} disabled={isEntryLocked} sx={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.1, height: 34, minWidth: 62, px: 1, whiteSpace: 'nowrap', bgcolor: 'var(--rlc-primary)', '&:hover': { bgcolor: 'var(--rlc-primary-hover)' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Paste</Button>
+                <Button variant="contained" disabled={isEntryLocked} onClick={() => { setSmsInput(""); setParsedEntries([]); setShowModal(true); }} sx={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.1, height: 34, minWidth: 82, px: 1, whiteSpace: 'nowrap', bgcolor: '#7c3aed', '&:hover': { bgcolor: '#6d28d9' }, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>Paste SMS</Button>
                 <TextField
                   size="small"
                   label="Search Number"
@@ -4318,8 +4377,10 @@ function Center({ onSummaryChange }) {
                   onChange={(e) => setSearchNumber(e.target.value)}
                   placeholder="Type NO..."
                   sx={{
-                    minWidth: { xs: 170, sm: 190 },
-                    flex: 1,
+                    minWidth: { xs: 140, sm: 150 },
+                    width: { xs: 140, sm: 154 },
+                    flex: '0 0 auto',
+                    '& .MuiInputBase-input': { py: 0.75 },
                     '& .MuiOutlinedInput-root': {
                       color: 'var(--rlc-table-text)',
                       backgroundColor: '#fff',
@@ -4732,6 +4793,37 @@ function Center({ onSummaryChange }) {
           <Button onClick={performDelete} color="error" variant="contained" disabled={isDeleting}>{isDeleting ? 'Deleting...' : 'Delete'}</Button>
         </DialogActions>
       </Dialog>
+
+      {showNoSmsModal && (
+        <div className="fixed inset-0 flex items-center justify-center px-3" style={{ zIndex: 1300 }}>
+          <div className="bg-white p-5 rounded shadow-lg w-full max-w-md" style={{ zIndex: 1301 }}>
+            <h2 className="text-xl text-black font-bold mb-3">Convert NO-SMS</h2>
+            <p className="text-sm text-gray-700 mb-2">
+              {noSmsText ? `${noSmsText.split("=").filter(Boolean).length} NO selected` : "No NO selected"}
+            </p>
+            <textarea
+              className="w-full border text-black rounded p-2 h-28 mb-4"
+              value={noSmsText}
+              readOnly
+              onFocus={(e) => e.target.select()}
+            />
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={closeNoSmsModal}
+                className="bg-gray-400 text-black px-3 py-1 rounded hover:bg-gray-500"
+              >
+                Close
+              </button>
+              <button
+                onClick={handleCopyNoSms}
+                className="px-3 py-1 rounded text-white bg-green-600 hover:bg-green-700"
+              >
+                Copy SMS
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div className="fixed inset-0  bg-opacity-50 flex items-center justify-center" style={{ zIndex: 1300 }}>
