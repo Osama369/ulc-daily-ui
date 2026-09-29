@@ -6,6 +6,9 @@ import { showLoading, hideLoading } from '../../redux/features/alertSlice';
 import toast from 'react-hot-toast';
 import UserForm from '../../components/UserForm';
 
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.error || error?.response?.data?.message || fallback;
+
 const DistributorEditUser = ({userId, theme}) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -29,7 +32,7 @@ const DistributorEditUser = ({userId, theme}) => {
         console.log('Fetched user data:', response.data);
       } catch (error) {
         // dispatch(hideLoading());
-        const errorMessage = error.response?.data?.message || 'Failed to fetch user data';
+        const errorMessage = getApiErrorMessage(error, 'Failed to fetch user data');
         setError(errorMessage);
         toast.error(errorMessage);
       } finally {
@@ -60,7 +63,7 @@ const DistributorEditUser = ({userId, theme}) => {
       }
     } catch (error) {
     //   dispatch(hideLoading());
-      const errorMessage = error.response?.data?.message || 'Failed to update user';
+      const errorMessage = getApiErrorMessage(error, 'Failed to update user');
       setError(errorMessage);
       toast.error(errorMessage);
     }

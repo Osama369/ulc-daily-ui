@@ -1828,6 +1828,18 @@ function Center({ onSummaryChange }) {
   };
 
 
+  const generateAkraPaltiPairs = (inputNo) => {
+    const raw = String(inputNo || '').trim();
+    if (!/^\d{2,8}$/.test(raw)) {
+      return [];
+    }
+
+    const combinations = getCombinations(raw, 2);
+    const pairs = combinations.flatMap(getPermutation);
+    return [...new Set(pairs)];
+  };
+
+
 
 
   const handlePaltiAKR = () => {
@@ -1840,12 +1852,9 @@ function Center({ onSummaryChange }) {
       return;
     }
 
-    if (no.length >= 3 && no.length <= 8) {
-      const combinations = getCombinations(no, 2); // Get all 2-digit combinations
-      const pairs = combinations.flatMap(getPermutation); // Get ordered pairs
-      const uniquePairs = [...new Set(pairs)]; // Remove duplicates
-
-      const formatted = uniquePairs.map((pair, index) => ({
+    const pairs = generateAkraPaltiPairs(no);
+    if (pairs.length > 0) {
+      const formatted = pairs.map((pair, index) => ({
         id: entries.length + index + 1,
         no: pair,
         f: f,
@@ -1857,7 +1866,65 @@ function Center({ onSummaryChange }) {
       setNo('');
       noInputRef.current?.focus();
     } else {
-      alert("Please enter a valid 3 to 8-digit number.");
+      alert("Please enter a valid 2 to 8-digit number (digits only).");
+    }
+  };
+
+
+  const handlePaltiAKRMiddle = () => {
+    if (isPastClosingTime()) {
+      toast.error("Draw is closed. Cannot add entries.");
+      return;
+    }
+    if (!f || !s) {
+      alert("Please enter valid F/S values.");
+      return;
+    }
+
+    const pairs = generateAkraPaltiPairs(no);
+    if (pairs.length > 0) {
+      const formatted = pairs.map((pair, index) => ({
+        id: entries.length + index + 1,
+        no: `+${pair}+`,
+        f: f,
+        s: s,
+        selected: false,
+      }));
+
+      addEntry(formatted);
+      setNo('');
+      noInputRef.current?.focus();
+    } else {
+      alert("Please enter a valid 2 to 8-digit number (digits only).");
+    }
+  };
+
+
+  const handlePaltiAKRBack = () => {
+    if (isPastClosingTime()) {
+      toast.error("Draw is closed. Cannot add entries.");
+      return;
+    }
+    if (!f || !s) {
+      alert("Please enter valid F/S values.");
+      return;
+    }
+
+    const pairs = generateAkraPaltiPairs(no);
+    if (pairs.length > 0) {
+      const formatted = pairs.map((pair, index) => ({
+        id: entries.length + index + 1,
+        no: `++${pair}`,
+        f: f,
+        s: s,
+        selected: false,
+      }));
+
+      addEntry(formatted);
+      setNo('');
+      noInputRef.current?.focus();
+    } else {
+      alert("Please enter a valid 2 to 8-digit number (digits only).");
     }
   };
 
@@ -4759,6 +4826,8 @@ function Center({ onSummaryChange }) {
           <Box sx={{ bgcolor: 'var(--rlc-card-green-dark)', color: '#ffffff', px: 1.1, py: 0.65, fontWeight: 800 }}>SCHEMES</Box>
           <Box sx={{ p: 1.1, display: 'flex', flexDirection: 'column', gap: 0.8, overflowY: 'auto', minHeight: 0 }}>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKR}><FaStar /> <FaStar /> <span>آکڑا پلٹی</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKRMiddle}><FaStar /> <FaStar /> <span>آکڑا پلٹی مڈل</span></button>
+            <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiAKRBack}><FaStar /> <FaStar /> <span>آکڑا پلٹی بیک</span></button>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handlePaltiTandula}><FaStar /> <FaStar /> <FaStar />  <span>ٹنڈولا پلٹی</span></button>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handleChakriRing}><FaStar /> <FaStar /> <FaStar /> <span>ٹنڈولا 24</span></button>
             <button disabled={isEntryLocked} className="w-full flex items-center space-x-2 px-3 py-1.5 text-base font-bold text-white rounded disabled:cursor-not-allowed" style={{ background: isEntryLocked ? 'var(--rlc-disabled)' : 'var(--rlc-primary)' }} onClick={handle3FigureRingWithX}><FaStar /> <FaStar /> <FaStar /> <span>ٹنڈولا 12</span></button>

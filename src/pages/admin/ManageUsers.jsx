@@ -17,6 +17,9 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import TextField from '@mui/material/TextField';
 
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.error || error?.response?.data?.message || fallback;
+
 const ManageUsers = () => {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -37,7 +40,7 @@ const ManageUsers = () => {
       setUsers(res.data || []);
     } catch (err) {
       console.error("Error fetching users:", err);
-      const msg = err.response?.data?.message || "Failed to load users";
+      const msg = getApiErrorMessage(err, "Failed to load users");
       setError(msg);
       toast.error(msg);
       setUsers([]);
@@ -64,7 +67,7 @@ const ManageUsers = () => {
       toast.success(`User status updated to ${newStatus ? 'active' : 'inactive'}`);
     } catch (err) {
       console.error("Error updating user status:", err);
-      const msg = err.response?.data?.message || "Failed to update user status";
+      const msg = getApiErrorMessage(err, "Failed to update user status");
       toast.error(msg);
     } finally {
       dispatch(hideLoading());
@@ -80,7 +83,7 @@ const ManageUsers = () => {
       toast.success("User deleted successfully");
     } catch (err) {
       console.error("Error deleting user:", err);
-      const msg = err.response?.data?.message || "Failed to delete user";
+      const msg = getApiErrorMessage(err, "Failed to delete user");
       toast.error(msg);
     } finally {
       dispatch(hideLoading());
@@ -133,7 +136,7 @@ const ManageUsers = () => {
       closeTransferModal();
     } catch (err) {
       console.error('Transfer error:', err);
-      toast.error(err.response?.data?.error || 'Transfer failed');
+      toast.error(getApiErrorMessage(err, 'Transfer failed'));
     } finally {
       setTransferLoading(false);
     }

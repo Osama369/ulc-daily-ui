@@ -11,6 +11,9 @@ import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
 import CircularProgress from '@mui/material/CircularProgress';
 
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.error || error?.response?.data?.message || fallback;
+
 const EditUser = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -29,7 +32,7 @@ const EditUser = () => {
         setUserData(response.data);
       } catch (err) {
         console.error("Error fetching user:", err);
-        const msg = err.response?.data?.message || "Failed to load user data";
+        const msg = getApiErrorMessage(err, "Failed to load user data");
         setError(msg);
         toast.error(msg);
       } finally {
@@ -50,7 +53,7 @@ const EditUser = () => {
       navigate("/admin/manage-users");
     } catch (err) {
       dispatch(hideLoading());
-      const msg = err.response?.data?.message || "Failed to update user";
+      const msg = getApiErrorMessage(err, "Failed to update user");
       setError(msg);
       toast.error(msg);
     }

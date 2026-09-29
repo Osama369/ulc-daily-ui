@@ -1,6 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import axios from 'axios';
 import Homepage from './pages/Homepage';
 import Login from './pages/Login';
@@ -30,8 +30,12 @@ import { clearUser, setUser } from './redux/features/userSlice';
 function App() {
   const dispatch = useDispatch();
   const { loading } = useSelector(state => state.alertSlice)
+  const authBootstrapStarted = useRef(false);
 
   useEffect(() => {
+    if (authBootstrapStarted.current) return;
+    authBootstrapStarted.current = true;
+
     const bootstrapAuth = async () => {
       try {
         const response = await axios.get('/api/v1/auth/me');

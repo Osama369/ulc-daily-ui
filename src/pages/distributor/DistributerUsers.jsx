@@ -6,6 +6,9 @@ import toast from 'react-hot-toast';
 import { Link } from 'react-router-dom';
 import { FaEdit, FaTrash, FaToggleOn, FaToggleOff } from 'react-icons/fa';
 
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.error || error?.response?.data?.message || fallback;
+
 const DistributerUsers = ({ onEditUser }) => {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -31,8 +34,9 @@ const DistributerUsers = ({ onEditUser }) => {
     } catch (error) {
       console.error("Error fetching users:", error);
       if (isMounted.current) {
-        setError(error.response?.data?.message || "Failed to load users");
-        toast.error(error.response?.data?.message || "Failed to load users");
+        const msg = getApiErrorMessage(error, "Failed to load users");
+        setError(msg);
+        toast.error(msg);
       }
     } finally {
       if (isMounted.current) {
@@ -70,7 +74,7 @@ const DistributerUsers = ({ onEditUser }) => {
       toast.success(`User status updated to ${newStatus ? 'active' : 'inactive'}`);
     } catch (error) {
       console.error("Error updating user status:", error);
-      toast.error(error.response?.data?.message || "Failed to update user status");
+      toast.error(getApiErrorMessage(error, "Failed to update user status"));
     } finally {
       // dispatch(hideLoading());
     }
@@ -93,7 +97,7 @@ const DistributerUsers = ({ onEditUser }) => {
       toast.success("User deleted successfully");
     } catch (error) {
       console.error("Error deleting user:", error);
-      toast.error(error.response?.data?.message || "Failed to delete user");
+      toast.error(getApiErrorMessage(error, "Failed to delete user"));
     } finally {
       // dispatch(hideLoading());
     }
@@ -149,7 +153,7 @@ const DistributerUsers = ({ onEditUser }) => {
       closeTransferModal();
     } catch (err) {
       console.error('Transfer error:', err);
-      const msg = err.response?.data?.error || 'Transfer failed';
+      const msg = getApiErrorMessage(err, 'Transfer failed');
       toast.error(msg);
       setTransferLoading(false);
     }
