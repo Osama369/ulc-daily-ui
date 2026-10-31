@@ -5,6 +5,8 @@ import { useSelector } from 'react-redux';
 // import { toast } from 'react-toastify';
 import toast from 'react-hot-toast';
 import { REPORT_TYPE_OPTIONS, runReportExportByType } from '../utils/reportExport';
+import { checkPositionalMatch } from '../utils/prizeMatching';
+import { getPakistanISODate } from '../utils/date';
 
 const Reports = () => {
   const ALL_CLOSED_DRAWS = '__ALL_CLOSED_DRAWS__';
@@ -15,7 +17,7 @@ const Reports = () => {
 
   const [draws, setDraws] = useState([]);
   const [selectedDraw, setSelectedDraw] = useState(null);
-  const [drawDate, setDrawDate] = useState(new Date().toISOString().split('T')[0]);
+  const [drawDate, setDrawDate] = useState(() => getPakistanISODate(new Date()));
   const [drawTime] = useState('11 AM');
   const [selectedClient, setSelectedClient] = useState('');
   const [clients, setClients] = useState([]);
@@ -651,195 +653,6 @@ const Reports = () => {
     return (Math.round(n * 100) / 100).toFixed(2);
   };
 
-  const checkPositionalMatch = (entry, winningNumber) => {
-    // Remove any spaces and ensure consistent format
-    const cleanEntry = entry.toString().trim();
-    const win = String(winningNumber ?? '').trim().padStart(4, '0').slice(-4);
-
-    // Strict single-digit positional rules:
-    // 7 -> pos1, +7 -> pos2, ++7 -> pos3, +++7 -> pos4
-    const strictSingleDigit = cleanEntry.match(/^(\+{0,3})(\d)$/);
-    if (strictSingleDigit) {
-      const plusCount = strictSingleDigit[1].length;
-      const digit = strictSingleDigit[2];
-      return win[plusCount] === digit;
-    }
-
-    // if (!cleanEntry.includes('+')) {
-    //   // For plain numbers, only check if they are exact substrings of winning number
-    //   // AND the entry has '+' patterns or is exactly the winning number
-    //   return false;
-    // }
-    // Handle patterns like +4+6, +34+, etc.
-    if (cleanEntry.includes('+')) {
-      // +NN means match positions 2 and 3 in a 4-digit winning number.
-      // Example: +13 matches 0137 because win.slice(1, 3) === "13".
-      if (cleanEntry.length === 3 && cleanEntry.match(/^\+\d\d$/)) {
-        const digits = cleanEntry.slice(1);
-        if (win.slice(1, 3) === digits) {
-          return true;
-        }
-      }
-
-      // For 2-digit patterns like +4+6
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\+\d$/)) {
-        const digit1 = cleanEntry[1]; // 4
-        const digit3 = cleanEntry[3]; // 6
-
-        // Check if these digits match positions in winning number
-        if (winningNumber[1] === digit1 && winningNumber[3] === digit3) {
-          return true; // Matches positions 2 and 4 of 3456
-        }
-      }
-
-      // For 3-digit patterns like +45+ (positions 2,3)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\d\+$/)) {
-        const digits = cleanEntry.slice(1, 3); // "45"
-        if (winningNumber.slice(1, 3) === digits) {
-          return true;
-        }
-      }
-
-      // For patterns like 3+5+ (positions 1,3)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\+\d\+$/)) {
-        const digit1 = cleanEntry[0];
-        const digit3 = cleanEntry[2];
-        if (winningNumber[0] === digit1 && winningNumber[2] === digit3) {
-          return true;
-        }
-      }
-
-      // For patterns like 6++8 (positions 1 and 4)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\+\+\d$/)) {
-        const firstDigit = cleanEntry[0];
-        const lastDigit = cleanEntry[3];
-        if (winningNumber[0] === firstDigit && winningNumber[3] === lastDigit) {
-          return true;
-        }
-      }
-
-      // For patterns like ++56 (last two positions)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\+\d\d$/)) {
-        const digits = cleanEntry.slice(2); // "56"
-        if (winningNumber.slice(2) === digits) {
-          return true;
-        }
-      }
-
-      // For patterns like +76+ (checking if 76 appears in positions 2,3 of winning number)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\d\+$/)) {
-        const digits = cleanEntry.slice(1, 3); // "76"
-        if (winningNumber.slice(1, 3) === digits) {
-          return true;
-        }
-      }
-
-      // For patterns like 67+8 (checking consecutive positions)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\d\+\d$/)) {
-        const firstTwo = cleanEntry.slice(0, 2); // "67"
-        const lastDigit = cleanEntry[3]; // "8"
-        if (winningNumber.slice(0, 2) === firstTwo && winningNumber[3] === lastDigit) {
-          return true;
-        }
-      }
-
-      // For patterns like 6+68 (checking positions 1,3,4)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\d\+\d\d$/)) {
-        const firstDigit = cleanEntry[0]; // "6"
-        const lastTwo = cleanEntry.slice(2); // "68"
-        if (winningNumber[0] === firstDigit && winningNumber.slice(2) === lastTwo) {
-          return true;
-        }
-      }
-
-      // **NEW: For patterns like +990 (last 3 digits of 4-digit winning number)**
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\d\d\d$/)) {
-        const lastThreeDigits = cleanEntry.slice(1); // "990"
-        if (winningNumber.slice(1) === lastThreeDigits) { // Check if 7990 ends with 990
-          return true;
-        }
-      }
-
-      // **NEW: For patterns like +99 (last 2 digits)**
-      if (cleanEntry.length === 3 && cleanEntry.match(/^\+\d\d$/)) {
-        const lastTwoDigits = cleanEntry.slice(1); // "99"
-        if (winningNumber.slice(-2) === lastTwoDigits) { // Check if 7990 ends with 99
-          return true;
-        }
-      }
-
-      // **NEW: For patterns like +9 (last digit)**
-      if (cleanEntry.length === 2 && cleanEntry.match(/^\+\d$/)) {
-        const lastDigit = cleanEntry.slice(1); // "9"
-        if (winningNumber.slice(-1) === lastDigit) { // Check if 7990 ends with 9
-          return true;
-        }
-      }
-
-      // Pattern: +8 (matches if 8 appears in position 2,3, or 4 of winning number)
-      if (cleanEntry.length === 2 && cleanEntry.match(/^\+\d$/)) {
-        const digit = cleanEntry[1];
-        // Check positions 2, 3, 4 (indices 1, 2, 3)
-        for (let i = 1; i < winningNumber.length; i++) {
-          if (winningNumber[i] === digit) {
-            return true;
-          }
-        }
-      }
-
-      // Pattern: ++8 (matches if 8 appears in position 3 or 4 of winning number)
-      if (cleanEntry.length === 3 && cleanEntry.match(/^\+\+\d$/)) {
-        const digit = cleanEntry[2];
-        // Check positions 3, 4 (indices 2, 3)
-        for (let i = 2; i < winningNumber.length; i++) {
-          if (winningNumber[i] === digit) {
-            return true;
-          }
-        }
-      }
-
-      // Pattern: +++8 (matches if 8 appears in position 4 of winning number)
-      if (cleanEntry.length === 4 && cleanEntry.match(/^\+\+\+\d$/)) {
-        const digit = cleanEntry[3];
-        // Check position 4 (index 3)
-        if (winningNumber[3] === digit) {
-          return true;
-        }
-      }
-    }
-
-
-    // Special handling for 4-digit plain numbers (PANGORA section):
-    // treat them as matching if they equal either the first 4 or the
-    // last 4 digits of the 6-digit winning number.
-    if (cleanEntry.length === 4 && /^\d{4}$/.test(cleanEntry)) {
-      const winStr = winningNumber.toString().trim();
-      if (winStr.length >= 4 && winStr.slice(0, 4) === cleanEntry) {
-        return true;
-      }
-    }
-
-    // Check for partial consecutive matches (like 45, 56, etc.) for
-    // 2- and 3-digit plain numbers.
-    if (cleanEntry.length >= 2 && cleanEntry.length <= 3 && /^\d+$/.test(cleanEntry)) {
-      // Only match if the entry starts from the beginning of the winning number
-      if (winningNumber.startsWith(cleanEntry)) {
-        return true;
-      }
-    }
-
-    // **NEW: For single digit numbers without + symbols**
-    // Pattern: 8 (matches if 8 appears in position 1 of winning number)
-    if (cleanEntry.length === 1 && /^\d$/.test(cleanEntry)) {
-      const digit = cleanEntry;
-      // Check if digit matches first position of winning number
-      if (winningNumber[0] === digit) {
-        return true;
-      }
-    }
-
-    return false;
-  };
 
   const getAndSetVoucherData = async () => {  // use in to fetch data base on time/date
       const fetchedData = await fetchVoucherData(drawDate, drawTime);

@@ -27,9 +27,12 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
+import { getPakistanISODate } from '../../utils/date';
+
+const isValidWinningNumber = (value) => /^\d{4}$/.test(String(value ?? '').trim());
 
 const WinningNumbers = () => {
-  const [drawDate, setDrawDate] = useState(new Date().toISOString().split('T')[0]);
+  const [drawDate, setDrawDate] = useState(() => getPakistanISODate(new Date()));
   const [draws, setDraws] = useState([]);
   const [selectedDraw, setSelectedDraw] = useState(null);
   const [winningNumbers, setWinningNumbers] = useState([
@@ -258,6 +261,10 @@ const WinningNumbers = () => {
         setEditingIndex(null);
         return;
       }
+      if (!isValidWinningNumber(editDraft.number)) {
+        toast.error('Winning number must be exactly 4 digits (e.g. 0432).');
+        return;
+      }
       try {
         setLoading(true);
         const updated = (existingWinningNumbers || []).slice();
@@ -328,8 +335,8 @@ const WinningNumbers = () => {
 
       // Validate number formats
       for (const item of validNumbers) {
-        if (!/^\d+$/.test(String(item.number))) {
-          toast.error(`Invalid number format: ${item.number}. Only digits are allowed.`);
+        if (!isValidWinningNumber(item.number)) {
+          toast.error(`Invalid number: ${item.number}. Winning number must be exactly 4 digits (e.g. 0432).`);
           return;
         }
       }
@@ -401,9 +408,15 @@ const WinningNumbers = () => {
   const updateWinningNumbers = async () => {
     try {
       const validNumbers = winningNumbers.filter(item => item.number.trim() !== "");
-      
+
       if (validNumbers.length === 0) {
         toast.error("Please enter at least one winning number");
+        return;
+      }
+
+      const invalid = validNumbers.find((item) => !isValidWinningNumber(item.number));
+      if (invalid) {
+        toast.error(`Invalid number: ${invalid.number}. Winning number must be exactly 4 digits (e.g. 0432).`);
         return;
       }
 

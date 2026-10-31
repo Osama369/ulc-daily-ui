@@ -19,6 +19,30 @@ import LocationCityIcon from '@mui/icons-material/LocationCity';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 
+const NUMERIC_FIELDS = [
+  ['singleFigure', 'Single Figure Commission'],
+  ['doubleFigure', 'Double Figure Commission'],
+  ['tripleFigure', 'Triple Figure Commission'],
+  ['fourFigure', 'Four Figure Commission'],
+  ['crossFigureCommission', 'Cross Figure Commission'],
+  ['crossAkraCommission', 'Cross AKRA Commission'],
+  ['crossTandolaCommission', 'Cross Tandola Commission'],
+  ['hinsaMultiplier', 'Figure Prize'],
+  ['akraMultiplier', 'AKRA Prize'],
+  ['tandolaMultiplier', 'Tandola Prize'],
+  ['pangoraMultiplier', 'Pangora Prize'],
+  ['crossFigureMultiplier', 'Cross Figure Prize'],
+  ['crossAkraMultiplier', 'Cross AKRA Prize'],
+  ['crossTandolaMultiplier', 'Cross Tandola Prize'],
+  ['commission', 'Hissa (Commission)'],
+];
+
+const CROSS_PRIZE_PAIRS = [
+  ['crossFigureMultiplier', 'hinsaMultiplier', 'Cross Figure Prize'],
+  ['crossAkraMultiplier', 'akraMultiplier', 'Cross AKRA Prize'],
+  ['crossTandolaMultiplier', 'tandolaMultiplier', 'Cross Tandola Prize'],
+];
+
 const UserForm = ({ onSubmit, initialData = {}, isEditing = false, theme }) => {
   const [formData, setFormData] = useState({
     username: initialData.username || "",
@@ -90,8 +114,32 @@ const UserForm = ({ onSubmit, initialData = {}, isEditing = false, theme }) => {
       }
     }
 
+    // Commission and prize fields feed straight into the bill, so reject
+    // anything that is not a non-negative number.
+    const invalidField = NUMERIC_FIELDS.find(([name]) => {
+      const n = Number(formData[name]);
+      return String(formData[name]).trim() === '' || !Number.isFinite(n) || n < 0;
+    });
+    if (invalidField) {
+      toast.error(`${invalidField[1]} must be a number 0 or greater`);
+      return;
+    }
+
+    // Catch typos like 7 instead of 75: a cross prize far below its normal
+    // prize silently under-pays every cross entry.
+    const suspicious = CROSS_PRIZE_PAIRS.filter(([cross, base]) => {
+      const c = Number(formData[cross]);
+      const b = Number(formData[base]);
+      return c > 0 && b > 0 && c < b / 2;
+    });
+    if (suspicious.length > 0) {
+      const lines = suspicious.map(([cross, base, label]) => `${label}: ${formData[cross]} (normal prize ${formData[base]})`);
+      if (!window.confirm(`These cross prizes are less than half of the normal prize:\n\n${lines.join('\n')}\n\nSave anyway?`)) return;
+    }
+
     // Prepare data for submission
     const dataToSubmit = { ...formData };
+    NUMERIC_FIELDS.forEach(([name]) => { dataToSubmit[name] = Number(formData[name]); });
     
     // Remove unnecessary fields
     delete dataToSubmit.confirmPassword;
