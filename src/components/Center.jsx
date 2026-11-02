@@ -18,6 +18,33 @@ import { checkPositionalMatch } from '../utils/prizeMatching';
 import { getPakistanISODate } from '../utils/date';
 /* Body Content removed — du spplicated table was present above in the centered two-column layout. */
 
+// One voucher table row. Memoized with primitive props so typing in NO/F/S
+// (which re-renders Center on every key) does not re-render the visible rows.
+const EntryRow = React.memo(function EntryRow({ rowId, no, f, s, clientName, checked, showClient, locked, onToggle, onDelete }) {
+  return (
+    <TableRow hover sx={{ borderBottom: '1px solid var(--rlc-table-border)' }}>
+      <TableCell padding="checkbox">
+        <Checkbox checked={checked} onChange={() => onToggle(rowId)} sx={{ color: 'var(--rlc-table-muted)', '&.Mui-checked': { color: 'var(--rlc-primary)' } }} />
+      </TableCell>
+      <TableCell sx={{ color: 'var(--rlc-table-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.98rem', fontWeight: 600 }}>{no}</TableCell>
+      <TableCell align="right" sx={{ color: 'var(--rlc-table-text)', fontSize: '0.98rem', fontWeight: 600 }}>{f}</TableCell>
+      <TableCell align="right" sx={{ color: 'var(--rlc-table-text)', fontSize: '0.98rem', fontWeight: 600 }}>{s}</TableCell>
+      {showClient && (
+        <TableCell sx={{ color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.92rem' }}>
+          {clientName || '-'}
+        </TableCell>
+      )}
+      <TableCell align="center">
+        {!showClient && (
+          <IconButton aria-label="delete" size="small" disabled={locked} onClick={() => onDelete(rowId)} sx={{ bgcolor: 'var(--rlc-danger)', color: '#fff', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, minWidth: 40, height: 32, borderRadius: 1, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
+            <DeleteIcon fontSize="small" />
+          </IconButton>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+});
+
 
 function Center({ onSummaryChange }) {
   const ALL_CLOSED_DRAWS = '__ALL_CLOSED_DRAWS__';
@@ -48,6 +75,10 @@ function Center({ onSummaryChange }) {
   const [entries, setEntries] = useState([]);
   const [voucherData, setVoucherData] = useState([]);
   const voucherDataRef = useRef([]);
+  // Entry save queue (see flushSaveQueue)
+  const saveQueueRef = useRef([]);
+  const saveInFlightRef = useRef(false);
+  const tempSeqRef = useRef(0);
   const [selectedEntries, setSelectedEntries] = useState([]);
   const tableContainerRef = useRef(null);
   const prevEntriesCountRef = useRef(0);
@@ -494,88 +525,93 @@ function Center({ onSummaryChange }) {
       secondPrice: Number(entry.s) || 0,
     }));
 
-    const payload = { data: formattedData };
     // require selected timeSlot and date
-    if (selectedDraw && selectedDraw._id) {
-      payload.timeSlotId = selectedDraw._id;
-      payload.date = drawDate;
-      // Prevent saving to closed/inactive time slots
-      if (selectedDraw.isActive === false) {
-        showEntryError('Selected time slot is closed. Cannot save records.');
-        return;
-      }
-    } else {
+    if (!(selectedDraw && selectedDraw._id)) {
       showEntryError("Please select a time slot before saving.");
       return;
     }
+    // Prevent saving to closed/inactive time slots
+    if (selectedDraw.isActive === false) {
+      showEntryError('Selected time slot is closed. Cannot save records.');
+      return;
+    }
+    const slotKey = `${selectedDraw._id}|${drawDate}`;
 
-    // Snapshot for rollback
-    const prev = voucherDataRef.current || entries || [];
-
-    // Create temporary items to show immediately in UI (use _tempId to identify)
-    const now = Date.now();
-    const tempItems = formattedData.map((item, idx) => ({
+    // Show the rows immediately; each keeps a unique _tempId until the server confirms it.
+    const tempItems = formattedData.map((item) => ({
       parentId: null,
       objectId: undefined,
       no: item.uniqueId,
       f: item.firstPrice,
       s: item.secondPrice,
       selected: false,
-      _tempId: `temp_${now}_${idx}`,
+      _tempId: `temp_${++tempSeqRef.current}`,
+      _slotKey: slotKey,
     }));
+    setVoucherData(prevArr => [...prevArr, ...tempItems]);
+    setEntries(prevArr => [...prevArr, ...tempItems]);
 
-    // Optimistically update UI (do not clear input fields here — keep existing input flow)
-    setVoucherData(prevArr => [ ...prevArr , ...tempItems]);
-    setEntries(prevArr => [ ...prevArr, ...tempItems]);
+    saveQueueRef.current.push(...tempItems.map((item) => ({
+      tempId: item._tempId,
+      slotKey,
+      timeSlotId: selectedDraw._id,
+      date: drawDate,
+      entry: { uniqueId: item.no, firstPrice: item.f, secondPrice: item.s },
+    })));
+    flushSaveQueue();
+  };
+
+  // Like Ritmurak: only one add-data request is in flight at a time. Entries typed
+  // while it runs wait in the queue and go together in the next request, so fast
+  // typing never races on the balance and rows stay in typing order.
+  const flushSaveQueue = async () => {
+    if (saveInFlightRef.current || saveQueueRef.current.length === 0) return;
+    const { slotKey, timeSlotId, date } = saveQueueRef.current[0];
+    const batch = saveQueueRef.current.filter((q) => q.slotKey === slotKey);
+    saveQueueRef.current = saveQueueRef.current.filter((q) => q.slotKey !== slotKey);
+    saveInFlightRef.current = true;
+
+    const batchTempIds = new Set(batch.map((q) => q.tempId));
+    const withoutBatch = (rows) => rows.filter((row) => !batchTempIds.has(row?._tempId));
 
     try {
-      // Send to server (do not block UI on final refresh)
-      const response = await axios.post("/api/v1/data/add-data", payload, {
-        // timeout: 10000,
+      const response = await axios.post("/api/v1/data/add-data", {
+        data: batch.map((q) => q.entry),
+        timeSlotId,
+        date,
       });
       await syncBalance(response.data?.newBalance);
 
-      // If server returns created data, reconcile quickly without a full refetch.
-      const createdSource = response.data?.newData
-        ? [response.data.newData]
-        : Array.isArray(response.data?.created)
-          ? response.data.created
-          : Array.isArray(response.data?.data)
-            ? response.data.data
-            : [];
-      const createdRows = normalizeVoucherRows(createdSource, selectedDraw?._id);
-
-      if (createdRows.length > 0) {
-        setVoucherData(prevArr => {
-          const tempKeys = new Set(tempItems.map((item) => `${item.no}|${item.f}|${item.s}`));
-          const remaining = prevArr.filter((row) => {
-            if (!row?._tempId) return true;
-            return !tempKeys.has(`${row.no}|${row.f}|${row.s}`);
-          });
-          return [...remaining, ...createdRows];
-        });
-        setEntries(prev => {
-          const tempKeys = new Set(tempItems.map((item) => `${item.no}|${item.f}|${item.s}`));
-          const remaining = prev.filter((row) => {
-            if (!row?._tempId) return true;
-            return !tempKeys.has(`${row.no}|${row.f}|${row.s}`);
-          });
-          return [...remaining, ...createdRows];
-        });
-      }
-      toast.success("Record saved successfully");
+      const createdRows = normalizeVoucherRows(
+        response.data?.newData ? [response.data.newData] : [],
+        timeSlotId
+      );
+      // Put the saved rows where their temp rows were; skip any a refresh already loaded.
+      const swapIn = (rows) => {
+        const firstIdx = rows.findIndex((row) => batchTempIds.has(row?._tempId));
+        if (firstIdx < 0) return rows;
+        const loadedIds = new Set(rows.map((row) => String(row?.objectId || '')).filter(Boolean));
+        const saved = createdRows.length > 0
+          ? createdRows.filter((row) => !loadedIds.has(String(row.objectId)))
+          : rows.filter((row) => batchTempIds.has(row?._tempId)).map(({ _tempId, _slotKey, ...row }) => row);
+        const next = withoutBatch(rows);
+        next.splice(firstIdx, 0, ...saved);
+        return next;
+      };
+      setVoucherData(swapIn);
+      setEntries(swapIn);
+      toast.success(batch.length === 1 ? "Record saved" : `${batch.length} records saved`, { id: 'entry-save' });
     } catch (error) {
-      // Rollback optimistic UI on failure
-      setVoucherData(prev);
-      setEntries(prev);
-      dispatch(hideLoading());
+      // Remove only this batch's rows; entries queued or saved meanwhile stay.
+      setVoucherData(withoutBatch);
+      setEntries(withoutBatch);
       console.error("Error adding entries:", error.response?.data?.error || error.message);
-      const failedNumbers = dataToAdd
-        .map((entry) => String(entry?.no || '').trim())
-        .filter(Boolean)
-        .join(', ');
+      const failedNumbers = batch.map((q) => q.entry.uniqueId).join(', ');
       const serverMessage = error.response?.data?.error || error.message || "Network/server error";
-      showEntryError(`Entry ${failedNumbers || 'NO'} not posted: ${serverMessage}`);
+      showEntryError(`Entry ${failedNumbers} not posted: ${serverMessage}`);
+    } finally {
+      saveInFlightRef.current = false;
+      if (saveQueueRef.current.length > 0) flushSaveQueue();
     }
   };
 
@@ -690,8 +726,15 @@ function Center({ onSummaryChange }) {
 
     const fetchedData = await fetchVoucherData(drawDate, timeSlotId);
     const combinedEntries = normalizeVoucherRows(fetchedData, timeSlotId);
-    setVoucherData(combinedEntries);
-    setEntries(combinedEntries);
+    // Keep rows still waiting in the save queue for this draw, or a refresh
+    // during fast entry would hide them until their save returns.
+    const slotKey = `${timeSlotId}|${drawDate}`;
+    const keepPending = (rows) => [
+      ...combinedEntries,
+      ...(rows || []).filter((row) => row?._tempId && row._slotKey === slotKey),
+    ];
+    setVoucherData(keepPending);
+    setEntries(keepPending);
   };
 
   const searchNeedle = String(searchNumber || "").trim();
@@ -857,7 +900,9 @@ function Center({ onSummaryChange }) {
       setVoucherData([]);
       setEntries([]);
     }
-  }, [selectedDraw, drawDate]);
+    // Keyed on the id: the 20s timeslot poll replaces the selectedDraw object
+    // and would otherwise refetch (and redraw) the table mid-entry.
+  }, [selectedDraw?._id, drawDate]);
 
   // Keep notification/panel winners synced to selected date + timeslot.
   useEffect(() => {
@@ -3921,6 +3966,13 @@ function Center({ onSummaryChange }) {
   const isEntryLocked = Boolean(selectedDraw && isSelectedDrawClosed());
   const pakistanTodayIso = getPakistanISODate(new Date());
 
+  // Stable row callbacks so memoized EntryRow skips re-render while typing;
+  // the ref always points at this render's handlers.
+  const rowActionsRef = useRef({});
+  rowActionsRef.current = { toggleSelectEntry, openDeleteConfirm };
+  const onRowToggle = useCallback((id) => rowActionsRef.current.toggleSelectEntry(id), []);
+  const onRowDelete = useCallback((id) => rowActionsRef.current.openDeleteConfirm(id), []);
+
   // Main Content
 
 
@@ -4382,26 +4434,19 @@ function Center({ onSummaryChange }) {
                           )}
 
                           {rowWindow.rows.map((row) => (
-                          <TableRow key={row.objectId || row._tempId || row.id} hover sx={{ borderBottom: '1px solid var(--rlc-table-border)' }}>
-                            <TableCell padding="checkbox">
-                              <Checkbox checked={selectedEntryIdSet.has(row.objectId || row.id)} onChange={() => toggleSelectEntry(row.objectId || row.id)} sx={{ color: 'var(--rlc-table-muted)', '&.Mui-checked': { color: 'var(--rlc-primary)' } }} />
-                            </TableCell>
-                            <TableCell sx={{ color: 'var(--rlc-table-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.98rem', fontWeight: 600 }}>{row.no}</TableCell>
-                            <TableCell align="right" sx={{ color: 'var(--rlc-table-text)', fontSize: '0.98rem', fontWeight: 600 }}>{row.f}</TableCell>
-                            <TableCell align="right" sx={{ color: 'var(--rlc-table-text)', fontSize: '0.98rem', fontWeight: 600 }}>{row.s}</TableCell>
-                            {isDistributorSearchView && (
-                              <TableCell sx={{ color: '#374151', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.92rem' }}>
-                                {row.clientName || '-'}
-                              </TableCell>
-                            )}
-                            <TableCell align="center">
-                              {!isDistributorSearchView && (
-                                <IconButton aria-label="delete" size="small" disabled={isEntryLocked} onClick={() => openDeleteConfirm(row.objectId || row.id)} sx={{ bgcolor: 'var(--rlc-danger)', color: '#fff', '&:hover': { bgcolor: 'var(--rlc-danger-hover)' }, minWidth: 40, height: 32, borderRadius: 1, '&.Mui-disabled': { bgcolor: 'var(--rlc-disabled)', color: '#fff' } }}>
-                                  <DeleteIcon fontSize="small" />
-                                </IconButton>
-                              )}
-                            </TableCell>
-                          </TableRow>
+                            <EntryRow
+                              key={row.objectId || row._tempId || row.id}
+                              rowId={row.objectId || row.id}
+                              no={row.no}
+                              f={row.f}
+                              s={row.s}
+                              clientName={row.clientName}
+                              checked={selectedEntryIdSet.has(row.objectId || row.id)}
+                              showClient={isDistributorSearchView}
+                              locked={isEntryLocked}
+                              onToggle={onRowToggle}
+                              onDelete={onRowDelete}
+                            />
                           ))}
 
                           {useVirtualRows && rowWindow.bottomSpacerHeight > 0 && (
